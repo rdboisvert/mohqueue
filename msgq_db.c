@@ -44,7 +44,7 @@ static str *msgq_columns [] =
   };
 
 /**********
-* functions
+* external functions
 **********/
 
 /**********
@@ -83,12 +83,11 @@ return;
 * Update Message Queue List
 *
 * INPUT:
-*   Arg (1) = DB pointer
-*   Arg (2) = connection pointer
+*   Arg (1) = connection pointer
 * OUTPUT: none
 **********/
 
-void update_msgq_lst (db_func_t *pdb, db1_con_t *pconn)
+void update_msgq_lst (db1_con_t *pconn)
 
 {
 /**********
@@ -96,6 +95,7 @@ void update_msgq_lst (db_func_t *pdb, db1_con_t *pconn)
 * o read queues from table
 **********/
 
+db_func_t *pdb = pmod_data->pdb;
 msgq_lst *pqlst = pmod_data->pmsgq_lst;
 int nidx;
 for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)

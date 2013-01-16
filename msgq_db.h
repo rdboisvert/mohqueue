@@ -24,8 +24,6 @@
 #ifndef MSGQ_DB_H
 #define MSGQ_DB_H
 
-#include "../../lib/srdb1/db.h"
-
 /**********
 * DB definitions
 **********/
@@ -47,7 +45,7 @@
 
 db1_con_t *msgq_dbconnect (void);
 void msgq_dbdisconnect (db1_con_t *);
-void update_msgq_lst (db_func_t *pdb, db1_con_t *pconn);
+void update_msgq_lst (db1_con_t *pconn);
 
 #if 0  /* ??? */
 #define SCA_DB_SUBSCRIPTIONS_NUM_COLUMNS    12

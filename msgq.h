@@ -21,9 +21,6 @@
  *
  */
 
-#include "msgq_common.h"
-#include "../../lib/srdb1/db.h"
-
 #ifndef MSGQ_H
 #define MSGQ_H
 
@@ -66,6 +63,9 @@ typedef struct
   struct tm_binds ptm [1];
   int msgq_cnt;
   msgq_lst *pmsgq_lst;
+  cmd_function fn_rtp_answer;
+  cmd_function fn_rtp_offer;
+  cmd_function fn_rtp_stream2uac;
   } mod_data;
 
 /**********

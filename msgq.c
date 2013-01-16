@@ -32,30 +32,6 @@
 
 MODULE_VERSION
 
-/* ??? move to msgq_str.c */
-
-char *formtmpstr (str *pstr)
-
-{
-char *pcstr = malloc (pstr->len + 1);
-if (!pcstr)
-  {
-  LM_ERR ("Unable to allocate local memory!");
-  return (NULL);
-  }
-memcpy (pcstr, pstr->s, pstr->len);
-pcstr [pstr->len] = 0;
-return (pcstr);
-}
-
-void freetmpstr (char *pcstr)
-
-{
-if (pcstr)
-  { free (pcstr); }
-return;
-}
-
 /**********
 * local function declarations
 **********/
@@ -233,7 +209,7 @@ if (db_check_table_version (pdb, pconn,
     pmod_data->pcfg->db_qtable.s, pdb_url->s, MSGQ_QTABLE_VERSION);
   goto dberr;
   }
-update_msgq_lst (pdb, pconn);
+update_msgq_lst (pconn);
 msgq_dbdisconnect (pconn);
 return (-1);
 
@@ -298,7 +274,6 @@ int mod_init (void)
 * o allocate shared mem and init
 * o init configuration data
 * o init DB
-* o bind to TM module
 **********/
 
 pmod_data = (mod_data *) shm_malloc (sizeof (mod_data));
@@ -312,9 +287,33 @@ if (!init_cfg ())
   { goto initerr; }
 if (!init_db ())
   { goto initerr; }
+
+/**********
+* o bind to TM module
+* o bind to RTPPROXY functions
+**********/
+
 if (load_tm_api (pmod_data->ptm))
   {
   LM_ERR ("Unable to load TM module");
+  goto initerr;
+  }
+pmod_data->fn_rtp_answer = find_export ("rtpproxy_answer", 0, 0);
+if (!pmod_data->fn_rtp_answer)
+  {
+  LM_ERR ("Unable to load rtpproxy_answer");
+  goto initerr;
+  }
+pmod_data->fn_rtp_offer = find_export ("rtpproxy_offer", 0, 0);
+if (!pmod_data->fn_rtp_offer)
+  {
+  LM_ERR ("Unable to load rtpproxy_offer");
+  goto initerr;
+  }
+pmod_data->fn_rtp_stream2uac = find_export ("rtpproxy_stream2uac", 2, 0);
+if (!pmod_data->fn_rtp_stream2uac)
+  {
+  LM_ERR ("Unable to load rtpproxy_stream2uac");
   goto initerr;
   }
 LM_INFO ("module initialized");

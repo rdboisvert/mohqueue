@@ -26,7 +26,6 @@
 
 #include <assert.h>
 
-#include "../../sr_module.h"
 #include "../../data_lump.h"
 #include "../../data_lump_rpl.h"
 #include "../../dprint.h"
@@ -34,17 +33,20 @@
 #include "../../flags.h"
 #include "../../hashes.h"
 #include "../../locking.h"
+#include "../../sr_module.h"
+#include "../../str.h"
+
+#include "../../lib/srdb1/db.h"
 #include "../../mem/mem.h"
 #include "../../mem/shm_mem.h"
+#include "../../modules/sl/sl.h"
+#include "../../modules/tm/tm_load.h"
 #include "../../parser/hf.h"
 #include "../../parser/msg_parser.h"
 #include "../../parser/contact/parse_contact.h"
 #include "../../parser/parse_expires.h"
 #include "../../parser/parse_from.h"
-#include "../../str.h"
-
-#include "../../modules/sl/sl.h"
-#include "../../modules/tm/tm_load.h"
+#include "../../parser/sdp/sdp.h"
 
 /* convenience macros */
 #define MSGQ_STRUCT_PTR_OFFSET( struct1, cast1, offset1 ) \
