@@ -52,10 +52,10 @@ mod_data *pmod_data;
 
 /* EXPORTED COMMANDS */
 static cmd_export_t mod_cmds [] = {
-  { "msgq_count", msgq_count, 1, msgq_count_fixup,
+  { "msgq_count", (cmd_function) msgq_count, 1, msgq_count_fixup, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
-  { "msgq_process", msgq_process, 0, NULL, REQUEST_ROUTE },
-  { "msgq_redirect", msgq_redirect, 2, msgq_redirect_fixup,
+  { "msgq_process", (cmd_function) msgq_process, 0, NULL, 0, REQUEST_ROUTE },
+  { "msgq_redirect", (cmd_function) msgq_redirect, 2, msgq_redirect_fixup, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
   { NULL, NULL, -1, 0, 0 },
 };
@@ -77,13 +77,16 @@ static param_export_t mod_parms [] = {
 /* MODULE EXPORTS */
 struct module_exports exports = {
   "msgqueue",       /* module name */
+  DEFAULT_DLFLAGS,  /* dlopen flags */
   mod_cmds,         /* exported functions */
-  NULL,             /* RPC methods */
   mod_parms,        /* exported parameters */
+  0,                /* statistics */
+  0,                /* MI functions */
+  0,                /* exported pseudo-variables */
+  0,                /* extra processes */
   mod_init,         /* module initialization function */
-  NULL,             /* response handling function */
+  0,                /* response handling function */
   mod_destroy,      /* destructor function */
-  NULL,             /* oncancel function */
   mod_child_init,   /* per-child initialization function */
 };
 
@@ -289,13 +292,18 @@ if (!init_db ())
   { goto initerr; }
 
 /**********
-* o bind to TM module
+* o bind to TM/RR modules
 * o bind to RTPPROXY functions
 **********/
 
 if (load_tm_api (pmod_data->ptm))
   {
   LM_ERR ("Unable to load TM module");
+  goto initerr;
+  }
+if (load_rr (pmod_data->prr))
+  {
+  LM_ERR ("Unable to load RR module");
   goto initerr;
   }
 pmod_data->fn_rtp_answer = find_export ("rtpproxy_answer", 0, 0);

@@ -27,6 +27,13 @@
 #include "msgq_funcs.h"
 
 /**********
+* definitions
+**********/
+
+#define SIPEOL  "\r\n"
+#define USRAGNT "Kamailio Message Queue"
+
+/**********
 * local constants
 **********/
 
@@ -34,6 +41,8 @@ const str MTHD_ACK = STR_STATIC_INIT ("ACK");
 const str MTHD_BYE = STR_STATIC_INIT ("BYE");
 const str MTHD_INVITE = STR_STATIC_INIT ("INVITE");
 const str MTHD_PRACK = STR_STATIC_INIT ("PRACK");
+
+str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 
 /**********
 * local functions
@@ -125,14 +134,25 @@ int first_invite_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
 /**********
-* SDP exists?
+* o SDP exists?
+* o send rtpproxy offer
 **********/
 
+char *pfncname = "first_invite_msg: ";
 if (!(pmsg->msg_flags & FL_SDP_BODY))
-  { return (0); }
-if (parse_sdp (pmsg))
-  { return (0); }
-
+  {
+  if (parse_sdp (pmsg))
+    {
+    LM_ERR ("%sINVITE lacks SDP", pfncname);
+    return (0);
+    }
+  }
+if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
+  {
+  LM_ERR ("%srtpproxy_offer refused", pfncname);
+  return (0);
+  }
+  
 /**********
 * extract
 * o Via
@@ -145,14 +165,64 @@ if (parse_sdp (pmsg))
 **********/
 
 /**********
-* reply w/body
+* o create new transaction
+* o get hash values
+* o create totag
+* o create reply w/SDP body
 **********/
 
-LM_INFO ("???INVITE has SDP");
-/*
-pmod_data->ptm->t_reply_with_body (ptrans, code, ptext, pbody, pnewhdr, ptotag);
-*/
-return (0);
+tm_api_t *ptm = pmod_data->ptm;
+if (ptm->t_newtran (pmsg) < 0)
+  {
+  LM_ERR ("%sUnable to create new transaction", pfncname);
+  return (0);
+  }
+unsigned int hash_index;
+unsigned int hash_label;
+if (ptm->t_get_trans_ident (pmsg, &hash_index, &hash_label) < 0)
+  {
+  LM_ERR ("%sUnable to get transaction hash", pfncname);
+  return (0);
+  }
+struct cell *ptrans;
+if (ptm->t_lookup_ident (&ptrans, hash_index, hash_label) < 0)
+  {
+  LM_ERR ("%sUnable to lookup transaction", pfncname);
+  return (0);
+  }
+str ptotag [1] = {STR_NULL};
+if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
+  {
+  LM_ERR ("%sUnable to create totag", pfncname);
+  return (0);
+  }
+if (pmod_data->prr->record_route (pmsg, NULL))
+  {
+  LM_ERR ("%sUnable to add record route", pfncname);
+  return (0);
+  }
+str pbody [1] = {STR_STATIC_INIT ("v=0" SIPEOL
+"o=- 1167618058 1167618058 IN IP4 10.211.64.5" SIPEOL
+"s=" USRAGNT SIPEOL
+"c=IN IP4 10.211.64.12" SIPEOL
+"t=0 0" SIPEOL
+"a=sendrecv" SIPEOL
+"m=audio 2230 RTP/AVP 9 127" SIPEOL
+"a=rtpmap:9 G722/8000" SIPEOL
+"a=rtpmap:127 telephone-event/8000" SIPEOL)};
+str pnewhdr [1] = {STR_STATIC_INIT (
+"Allow: INVITE, ACK, BYE, CANCEL, MESSAGE, SUBSCRIBE, NOTIFY, REFER" SIPEOL
+"Accept-Language: en" SIPEOL
+"Content-Type: application/sdp" SIPEOL
+"User-Agent: " USRAGNT SIPEOL)};
+if (ptm->t_reply_with_body
+  (ptrans, 200, presp_ok, pbody, pnewhdr, ptotag) < 0)
+  {
+  LM_ERR ("%sUnable to create reply", pfncname);
+  return (0);
+  }
+LM_INFO ("???sent reply to INVITE");
+return (1);
 }
 
 /**********
@@ -336,7 +406,7 @@ if (msgq_idx < 0)
 str smethod = REQ_LINE (pmsg).method;
 LM_INFO ("???%.*s: [%d]%s", STR_FMT (&smethod),
   msgq_idx, pmod_data->pmsgq_lst [msgq_idx].msgq_uri);
-if (!STR_EQ (smethod, MTHD_INVITE))
+if (STR_EQ (smethod, MTHD_INVITE))
   {
   /**********
   * initial INVITE?
@@ -346,11 +416,11 @@ if (!STR_EQ (smethod, MTHD_INVITE))
     { return (first_invite_msg (pmsg, msgq_idx)); }
   return (reinvite_msg (pmsg, msgq_idx, &pto_body->tag_value));
   }
-if (!STR_EQ (smethod, MTHD_PRACK))
+if (STR_EQ (smethod, MTHD_PRACK))
   { return (prack_msg (pmsg, msgq_idx)); }
-if (!STR_EQ (smethod, MTHD_ACK))
+if (STR_EQ (smethod, MTHD_ACK))
   { return (ack_msg (pmsg, msgq_idx)); }
-if (!STR_EQ (smethod, MTHD_BYE))
+if (STR_EQ (smethod, MTHD_BYE))
   { return (bye_msg (pmsg, msgq_idx)); }
 return (0);
 }

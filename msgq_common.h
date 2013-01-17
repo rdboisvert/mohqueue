@@ -26,6 +26,8 @@
 
 #include <assert.h>
 
+#include "../rr/api.h"
+
 #include "../../data_lump.h"
 #include "../../data_lump_rpl.h"
 #include "../../dprint.h"

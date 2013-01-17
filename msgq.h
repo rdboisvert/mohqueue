@@ -59,10 +59,11 @@ typedef struct
 typedef struct
   {
   mod_cfg pcfg [1];
-  db_func_t pdb [1];
-  struct tm_binds ptm [1];
   int msgq_cnt;
   msgq_lst *pmsgq_lst;
+  db_func_t pdb [1];
+  tm_api_t ptm [1];
+  rr_api_t prr [1];
   cmd_function fn_rtp_answer;
   cmd_function fn_rtp_offer;
   cmd_function fn_rtp_stream2uac;
