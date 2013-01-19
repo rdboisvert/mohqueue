@@ -301,7 +301,7 @@ if (load_tm_api (pmod_data->ptm))
   LM_ERR ("Unable to load TM module");
   goto initerr;
   }
-if (load_rr (pmod_data->prr))
+if (load_rr_api (pmod_data->prr))
   {
   LM_ERR ("Unable to load RR module");
   goto initerr;

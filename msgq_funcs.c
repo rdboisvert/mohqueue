@@ -45,6 +45,12 @@ const str MTHD_PRACK = STR_STATIC_INIT ("PRACK");
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 
 /**********
+* local function declarations
+**********/
+
+void invite_response_cb (struct cell *, int, struct tmcb_params *);
+
+/**********
 * local functions
 **********/
 
@@ -61,10 +67,45 @@ int ack_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
 /**********
-* 
+* o get transaction hash
+* o SDP exists?
 **********/
 
-return (0);
+tm_api_t *ptm = pmod_data->ptm;
+char *pfncname = "ack_msg: ";
+unsigned int hash_index;
+unsigned int hash_label;
+/* ??? respond with valid error replies */
+if (ptm->t_get_trans_ident (pmsg, &hash_index, &hash_label) < 0)
+  {
+  LM_ERR ("%sUnable to get transaction hash", pfncname);
+  return (0);
+  }
+LM_INFO ("???%shash=%d, %d", pfncname, hash_index, hash_label);
+if (!(pmsg->msg_flags & FL_SDP_BODY))
+  {
+  if (parse_sdp (pmsg))
+    {
+    LM_ERR ("%sACK lacks SDP", pfncname);
+    return (0);
+    }
+  }
+
+/**********
+* rtpproxy_answer and UAC stream
+**********/
+
+if (pmod_data->fn_rtp_answer (pmsg, NULL, NULL) != 1)
+  {
+  LM_ERR ("%srtpproxy_answer refused", pfncname);
+  return (0);
+  }
+if (pmod_data->fn_rtp_stream2uac (pmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
+  {
+  LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
+  return (0);
+  }
+return (1);
 }
 
 /**********
@@ -152,7 +193,7 @@ if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
   LM_ERR ("%srtpproxy_offer refused", pfncname);
   return (0);
   }
-  
+
 /**********
 * extract
 * o Via
@@ -165,6 +206,7 @@ if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
 **********/
 
 /**********
+* o record route
 * o create new transaction
 * o get hash values
 * o create totag
@@ -172,11 +214,22 @@ if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
+if (pmod_data->prr->record_route (pmsg, NULL)) /* ??? not working */
+  {
+  LM_ERR ("%sUnable to add record route", pfncname);
+  return (0);
+  }
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
   return (0);
   }
+if (!ptm->t_reply (pmsg, 100, "Your call is important to us"))
+  {
+  LM_ERR ("%sUnable to reply to INVITE", pfncname);
+  return (0);
+  }
+#if 0 /* ??? */
 unsigned int hash_index;
 unsigned int hash_label;
 if (ptm->t_get_trans_ident (pmsg, &hash_index, &hash_label) < 0)
@@ -184,6 +237,7 @@ if (ptm->t_get_trans_ident (pmsg, &hash_index, &hash_label) < 0)
   LM_ERR ("%sUnable to get transaction hash", pfncname);
   return (0);
   }
+LM_INFO ("???%shash=%d, %d", pfncname, hash_index, hash_label);
 struct cell *ptrans;
 if (ptm->t_lookup_ident (&ptrans, hash_index, hash_label) < 0)
   {
@@ -194,11 +248,6 @@ str ptotag [1] = {STR_NULL};
 if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
   {
   LM_ERR ("%sUnable to create totag", pfncname);
-  return (0);
-  }
-if (pmod_data->prr->record_route (pmsg, NULL))
-  {
-  LM_ERR ("%sUnable to add record route", pfncname);
   return (0);
   }
 str pbody [1] = {STR_STATIC_INIT ("v=0" SIPEOL
@@ -215,14 +264,64 @@ str pnewhdr [1] = {STR_STATIC_INIT (
 "Accept-Language: en" SIPEOL
 "Content-Type: application/sdp" SIPEOL
 "User-Agent: " USRAGNT SIPEOL)};
+
+/**********
+* o register callback to intercept reply
+* o send reply
+**********/
+
+if (ptm->register_tmcb (NULL, ptrans, TMCB_RESPONSE_READY, invite_response_cb, NULL, NULL) < 0)
+  {
+  LM_ERR ("%sUnable to create callback", pfncname);
+  return (0);
+  }
 if (ptm->t_reply_with_body
   (ptrans, 200, presp_ok, pbody, pnewhdr, ptotag) < 0)
   {
   LM_ERR ("%sUnable to create reply", pfncname);
   return (0);
   }
+#endif  /* ??? */
+
+/**********
+* record transaction ???
+**********/
+
 LM_INFO ("???sent reply to INVITE");
 return (1);
+}
+
+/**********
+* Invite Response Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parameters
+* OUTPUT: none
+**********/
+
+void invite_response_cb (struct cell *ptrans, int type, struct tmcb_params *ptparms)
+
+{
+/**********
+* rtpproxy_answer and UAC stream
+**********/
+
+sip_msg_t *pmsg = ptparms->rpl;
+char *pfncname = "invite_response_cb: ";
+if (pmod_data->fn_rtp_answer (pmsg, NULL, NULL) != 1)
+  {
+  LM_ERR ("%srtpproxy_answer refused", pfncname);
+  return;
+  }
+if (pmod_data->fn_rtp_stream2uac (pmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
+  {
+  LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
+  return;
+  }
+LM_INFO ("???rtp answer and stream2uac");
+return;
 }
 
 /**********
