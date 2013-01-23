@@ -46,6 +46,11 @@ typedef struct
   char msgq_mohfile [101];
   int msgq_flag;
   int msgq_id;
+//??? move to call queue
+  unsigned int hash_index;
+  unsigned int hash_label;
+  int dlg;
+//???
   } msgq_lst;
 
 typedef struct
