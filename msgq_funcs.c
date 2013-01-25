@@ -54,6 +54,60 @@ str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 **********/
 
 void invite_response_cb (struct cell *, int, struct tmcb_params *);
+int send_rtp_answer (sip_msg_t *, struct cell *, str *);
+
+void print_lumps (char *hdr, char *lmpname, sip_msg_t *pmsg, struct lump *plump)//???
+
+{
+LM_INFO ("%s: [%s] type=%d, op=%d", hdr, lmpname, plump->type, plump->op);
+if (plump->op == LUMP_ADD)
+  { LM_INFO ("ADD %.*s", plump->len, plump->u.value); }
+if (plump->op == LUMP_DEL)
+  { LM_INFO ("DEL %.*s", plump->len, &pmsg->buf [plump->u.offset]); }
+if (plump->before)
+  { print_lumps (hdr, "BEFORE", pmsg, plump->before); }
+if (plump->after)
+  { print_lumps (hdr, "AFTER", pmsg, plump->after); }
+if (plump->next)
+  { print_lumps (hdr, "NEXT", pmsg, plump->next); }
+}
+
+void print_rpl_lumps (char *hdr, char *lmpname, sip_msg_t *pmsg, struct lump_rpl *plump)//???
+
+{
+LM_INFO ("%s: [%s] flags=%d, %.*s", hdr, lmpname, plump->flags, STR_FMT (&plump->text));
+if (plump->next)
+  { print_rpl_lumps (hdr, "NEXT", pmsg, plump->next); }
+}
+
+void print_sip_lumps (char *hdr, sip_msg_t *pmsg)//???
+
+{
+if (pmsg->add_rm)
+  { print_lumps (hdr, "add_rm", pmsg, pmsg->add_rm); }
+if (pmsg->body_lumps)
+  { print_lumps (hdr, "body_lumps", pmsg, pmsg->body_lumps); }
+if (pmsg->reply_lump)
+  { print_rpl_lumps (hdr, "reply_lump", pmsg, pmsg->reply_lump); }
+}
+
+void print_crlf_str (char *hdr, str *pstr)
+
+{
+int pos = 0;
+int npos;
+LM_INFO ("%s", hdr);
+while (pos < pstr->len)
+  {
+  for (npos = 1; npos < pstr->len - pos; npos++)
+    {
+    if (pstr->s [npos + pos] == '\r')
+      { break; }
+    }
+  LM_INFO ("%.*s", npos, &pstr->s [pos]);
+  pos += npos + 1;
+  }
+}
 
 /**********
 * local functions
@@ -187,6 +241,7 @@ int first_invite_msg (sip_msg_t *pmsg, int msgq_idx)
 
 char *pfncname = "first_invite_msg: ";
 tm_api_t *ptm = pmod_data->ptm;
+print_sip_lumps ("ORIGINAL", pmsg);//???
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
@@ -202,13 +257,14 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     return (1);
     }
   }
-if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
+if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_offer refused", pfncname);
   if (ptm->t_reply (pmsg, 503, "Unable to proxy INVITE") < 0)
     { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
   return (1);
   }
+print_sip_lumps ("AFTER rtpproxy_offer", pmsg);//???
 
 /**********
 * extract
@@ -222,7 +278,7 @@ if (pmod_data->fn_rtp_offer (pmsg, NULL, NULL) != 1)
 **********/
 
 #if 0 /* ??? */
-if (pmod_data->prr->record_route (pmsg, NULL)) /* ??? not working */
+if (pmod_data->prr->record_route (pmsg, 0)) /* ??? not working */
   {
   LM_ERR ("%sUnable to add record route", pfncname);
   return (0);
@@ -274,8 +330,8 @@ str pnewhdr [1] = {STR_STATIC_INIT (
 **********/
 
 #if 0 //???
-if (ptm->register_tmcb (NULL, ptrans, TMCB_E2EACK_IN | TMCB_ON_FAILURE,
-  invite_response_cb, NULL, NULL) < 0)
+if (ptm->register_tmcb (0, ptrans, TMCB_E2EACK_IN | TMCB_ON_FAILURE,
+  invite_response_cb, 0, 0) < 0)
   {
   LM_ERR ("%sUnable to create callback", pfncname);
   return (1);
@@ -307,7 +363,13 @@ if (pmod_data->pmsgq_lst [msgq_idx].dlg != PRXDLG_PRACK)
   { LM_ERR ("%sConnection failed", pfncname); }
 else
   {
-  if (ptm->t_reply (pmsg, 200, "OK") < 0)
+  /**********
+  * since t_reply_with_body takes the shortcut of unreferencing the
+  * transaction we have to create a SIP body send it through rtpproxy
+  * and then use the result to build the final response
+  **********/
+
+  if (!send_rtp_answer (pmsg, ptrans, ptotag))
     { LM_ERR ("%sUnable to final reply to INVITE", pfncname); }
   else
     { LM_INFO ("%sdialog state=CONFIRMED", pfncname); } //???
@@ -667,4 +729,75 @@ int msgq_redirect (sip_msg_t *msg, char *p1, char *p2)
 LM_INFO ("???msgq_redirect ()");
 */
 return (1);
+}
+
+/**********
+* Send RTPProxy Answer
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = transaction pointer
+*   Arg (3) = totag pointer
+* OUTPUT: 0=unable to process; 1=processed
+**********/
+
+int send_rtp_answer (sip_msg_t *pmsg, struct cell *ptrans, str *ptotag)
+
+{
+/**********
+* build response from request
+**********/
+
+char *pfncname = "send_rtp_answer: ";
+tm_api_t *ptm = pmod_data->ptm;
+str pbuf [1] = {STR_NULL};
+pbuf->s = pmsg->buf; pbuf->len = pmsg->len; print_crlf_str ("SIPMSG", pbuf); pbuf->s = 0; pbuf->len = 0;//???
+struct bookmark pBM [1];
+int nrc = 0;
+pbuf->s = build_res_buf_from_sip_req (200, presp_ok, ptotag, ptrans->uas.request,
+  (unsigned int *)&pbuf->len, pBM);
+if (!pbuf->s || !pbuf->len)
+  {
+  LM_ERR ("%sUnable to build response", pfncname);
+  goto answer_done;
+  }
+print_crlf_str ("BUFFER", pbuf);//???
+struct sip_msg pnmsg [1];
+build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 1);
+
+/**********
+* o add SDP
+**********/
+
+/**********
+* send rtpproxy answer
+**********/
+
+if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
+  {
+  LM_ERR ("%srtpproxy_answer refused", pfncname);
+  goto answer_done;
+  }
+if (pmod_data->fn_rtp_stream2uac (pnmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
+  {
+  LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
+  goto answer_done;
+  }
+LM_INFO ("???rtp answer and stream2uac");
+print_sip_lumps ("rtpproxy_answer", pnmsg);//???
+if (ptm->t_reply (pmsg, 200, "OK") < 0)
+  {
+  LM_ERR ("%sUnable to reply", pfncname);
+  goto answer_done;
+  }
+nrc = 1;
+
+/**********
+* free buffer and return
+**********/
+
+answer_done:
+if (pbuf->s)
+  { pkg_free (pbuf->s); }
+return (nrc);
 }
