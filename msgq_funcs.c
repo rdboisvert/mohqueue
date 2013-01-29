@@ -22,8 +22,8 @@
  */
 
 #include "msgq_common.h"
-#include "msgq.h" /* ??? */
-#include "msgq_db.h" /* ??? */
+#include "msgq.h"
+#include "msgq_db.h"
 #include "msgq_funcs.h"
 
 /**********
@@ -32,6 +32,7 @@
 
 #define SIPEOL  "\r\n"
 #define USRAGNT "Kamailio Message Queue"
+#define CLENHDR "Content-Length"
 
 #define PRXDLG_NEW    1
 #define PRXDLG_RING   2
@@ -105,7 +106,7 @@ while (pos < pstr->len)
       { break; }
     }
   LM_INFO ("%.*s", npos, &pstr->s [pos]);
-  pos += npos + 1;
+  pos += npos + 2;
   }
 }
 
@@ -241,7 +242,6 @@ int first_invite_msg (sip_msg_t *pmsg, int msgq_idx)
 
 char *pfncname = "first_invite_msg: ";
 tm_api_t *ptm = pmod_data->ptm;
-print_sip_lumps ("ORIGINAL", pmsg);//???
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
@@ -264,7 +264,6 @@ if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
     { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
   return (1);
   }
-print_sip_lumps ("AFTER rtpproxy_offer", pmsg);//???
 
 /**********
 * extract
@@ -751,7 +750,6 @@ int send_rtp_answer (sip_msg_t *pmsg, struct cell *ptrans, str *ptotag)
 char *pfncname = "send_rtp_answer: ";
 tm_api_t *ptm = pmod_data->ptm;
 str pbuf [1] = {STR_NULL};
-pbuf->s = pmsg->buf; pbuf->len = pmsg->len; print_crlf_str ("SIPMSG", pbuf); pbuf->s = 0; pbuf->len = 0;//???
 struct bookmark pBM [1];
 int nrc = 0;
 pbuf->s = build_res_buf_from_sip_req (200, presp_ok, ptotag, ptrans->uas.request,
@@ -761,13 +759,135 @@ if (!pbuf->s || !pbuf->len)
   LM_ERR ("%sUnable to build response", pfncname);
   goto answer_done;
   }
-print_crlf_str ("BUFFER", pbuf);//???
-struct sip_msg pnmsg [1];
-build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 1);
 
 /**********
-* o add SDP
+* parse out first line and headers
 **********/
+
+char pclenhdr [] = CLENHDR;
+str pparse [20]; /* should be enough */
+int npos1, npos2;
+int nhdrcnt = 0;
+for (npos1 = 0; npos1 < pbuf->len; npos1++)
+  {
+  /**********
+  * find EOL
+  **********/
+
+  for (npos2 = npos1++; npos1 < pbuf->len; npos1++)
+    {
+    /**********
+    * o not EOL? (CRLF assumed)
+    * o next line a continuation? (RFC 3261 section 7.3.1)
+    **********/
+
+    if (pbuf->s [npos1] != '\n')
+      { continue; }
+    if (npos1 + 1 == pbuf->len)
+      { break; }
+    if (pbuf->s [npos1 + 1] == ' '
+      || pbuf->s [npos1 + 1] == '\t')
+      { continue; }
+    break;
+    }
+
+  /**********
+  * o blank is end of header (RFC 3261 section 7)
+  * o ignore Content-Length (assume followed by colon)
+  * o save header
+  **********/
+
+  if (npos1 - npos2 == 1)
+    { break; }
+  if (npos1 - npos2 > 14)
+    {
+    if (!strncasecmp (&pbuf->s [npos2], pclenhdr, 14))
+      { continue; }
+    }
+  pparse [nhdrcnt].s = &pbuf->s [npos2];
+  pparse [nhdrcnt++].len = npos1 - npos2 + 1;
+  }
+
+/**********
+* define SDP body and headers
+*
+* NOTES:
+* o IP address is faked since it will be replaced
+* o all audio streams are offered but only available will be used
+**********/
+
+str pextrahdr [1] =
+  {
+  STR_STATIC_INIT (
+  "Allow: INVITE, ACK, BYE, CANCEL, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  "Accept-Language: en" SIPEOL
+  "Content-Type: application/sdp" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  )
+  };
+
+str pSDP [1] =
+  {
+  STR_STATIC_INIT (
+  "v=0" SIPEOL
+  "o=- 1167618058 1167618058 IN IP4 1.1.1.1" SIPEOL
+  "s=" USRAGNT SIPEOL
+  "c=IN IP4 1.1.1.1" SIPEOL
+  "t=0 0" SIPEOL
+  "a=sendrecv" SIPEOL
+  "m=audio 2230 RTP/AVP 9 0 8 18 127" SIPEOL
+  "a=rtpmap:9 G722/8000" SIPEOL
+  "a=rtpmap:0 PCMU/8000" SIPEOL
+  "a=rtpmap:8 PCMA/8000" SIPEOL
+  "a=rtpmap:18 G729/8000" SIPEOL
+  "a=rtpmap:127 telephone-event/8000" SIPEOL
+  )
+  };
+
+/**********
+* recreate buffer with extra headers and SDP
+* o count hdrs, extra hdrs, content-length hdr, SDP
+* o alloc new buffer
+* o form new buffer
+* o replace orig buffer
+**********/
+
+for (npos1 = npos2 = 0; npos2 < nhdrcnt; npos2++)
+  { npos1 += pparse [npos2].len; }
+char pbodylen [30];
+sprintf (pbodylen, "%s: %d\r\n\r\n", pclenhdr, pSDP->len);
+npos1 += pextrahdr->len + strlen (pbodylen) + pSDP->len;
+char *pnewbuf = pkg_malloc (npos1);
+if (!pnewbuf)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  goto answer_done;
+  }
+for (npos1 = npos2 = 0; npos2 < nhdrcnt; npos2++)
+  {
+  memcpy (&pnewbuf [npos1], pparse [npos2].s, pparse [npos2].len);
+  npos1 += pparse [npos2].len;
+  }
+npos2 = pextrahdr->len;
+memcpy (&pnewbuf [npos1], pextrahdr->s, npos2);
+npos1 += npos2;
+npos2 = strlen (pbodylen);
+memcpy (&pnewbuf [npos1], pbodylen, npos2);
+npos1 += npos2;
+npos2 = pSDP->len;
+memcpy (&pnewbuf [npos1], pSDP->s, npos2);
+npos1 += npos2;
+pkg_free (pbuf->s);
+pbuf->s = pnewbuf;
+pbuf->len = npos1;
+
+/**********
+* build SIP msg
+**********/
+
+struct sip_msg pnmsg [1];
+build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 1);
+memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 
 /**********
 * send rtpproxy answer
@@ -778,16 +898,46 @@ if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
   LM_ERR ("%srtpproxy_answer refused", pfncname);
   goto answer_done;
   }
-if (pmod_data->fn_rtp_stream2uac (pnmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
+str pMOH [1] = {STR_STATIC_INIT ("/var/build/music_on_hold")};
+pv_elem_t *pmodel;
+pv_parse_format (pMOH, &pmodel);
+if (pmod_data->fn_rtp_stream2uac (pnmsg, (char *)pmodel, (char *)-1) != 1) /* ??? */
   {
   LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
   goto answer_done;
   }
-LM_INFO ("???rtp answer and stream2uac");
-print_sip_lumps ("rtpproxy_answer", pnmsg);//???
-if (ptm->t_reply (pmsg, 200, "OK") < 0)
+
+/**********
+* o create buffer from response
+* o find SDP
+**********/
+
+pkg_free (pbuf->s);
+pbuf->s = build_res_buf_from_sip_res (pnmsg, &(unsinged int)pbuf->len);
+if (!pbuf->s || !pbuf->len)
   {
-  LM_ERR ("%sUnable to reply", pfncname);
+  LM_ERR ("%sUnable to build new response", pfncname);
+  goto answer_done;
+  }
+str pnewSDP [1];
+for (npos1 = 0; npos1 < pbuf->len; npos1++)
+  {
+  if (pbuf->s [npos1] != '\n')
+    { continue; }
+  if (pbuf->s [npos1 - 3] == '\r')
+    { break; }
+  }
+pnewSDP->s = &pbuf->s [npos1 + 1];
+pnewSDP->len = pbuf->len - npos1 - 1;
+
+/**********
+* send adjusted reply
+**********/
+
+if (ptm->t_reply_with_body
+  (ptrans, 200, presp_ok, pnewSDP, pextrahdr, ptotag) < 0)
+  {
+  LM_ERR ("%sUnable to create reply", pfncname);
   goto answer_done;
   }
 nrc = 1;
