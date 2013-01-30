@@ -30,14 +30,13 @@
 
 #define URI_LEN 100
 
-/* msgq_flag values */
-
-#define MSGQF_ACT 0x01
-#define MSGQF_CHK 0x02
-
 /**********
 * structures
 **********/
+
+/* msgq_flag values */
+#define MSGQF_ACT 0x01
+#define MSGQF_CHK 0x02
 
 typedef struct
   {
@@ -46,12 +45,25 @@ typedef struct
   char msgq_mohfile [101];
   int msgq_flag;
   int msgq_id;
-//??? move to call queue
-  unsigned int hash_index;
-  unsigned int hash_label;
-  int dlg;
-//???
   } msgq_lst;
+
+/* call_state values */
+#define CLSTA_PRING     0x01
+#define CLSTA_PRINGACK  0x02
+#define CLSTA_RING      0x03
+#define CLSTA_INQUEUE   0x04
+#define CLSTA_ERR       0xFF
+
+typedef struct
+  {
+  int call_active;
+  char call_id [101];
+  char call_from [URI_LEN + 1];
+  char call_tag [101];
+  int call_state;
+  int call_rseq;
+  int msgq_id;
+  } call_lst;
 
 typedef struct
   {
@@ -66,6 +78,8 @@ typedef struct
   mod_cfg pcfg [1];
   int msgq_cnt;
   msgq_lst *pmsgq_lst;
+  int call_cnt;
+  call_lst *pcall_lst;
   db_func_t pdb [1];
   tm_api_t ptm [1];
   rr_api_t prr [1];

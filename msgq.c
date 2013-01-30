@@ -113,24 +113,24 @@ static int init_cfg (void)
 if (!*db_url)
   {
   LM_ERR ("db_url parameter not set!");
-  return (0);
+  return 0;
   }
 pmod_data->pcfg->db_url.s = db_url;
 pmod_data->pcfg->db_url.len = strlen (db_url);
 if (!*db_ctable)
   {
   LM_ERR ("db_ctable parameter not set!");
-  return (0);
+  return 0;
   }
 pmod_data->pcfg->db_ctable.s = db_ctable;
-pmod_data->pcfg->db_ctable.len = strlen(db_ctable);
+pmod_data->pcfg->db_ctable.len = strlen (db_ctable);
 if (!*db_qtable)
   {
   LM_ERR ("db_qtable parameter not set!");
-  return (0);
+  return 0;
   }
 pmod_data->pcfg->db_qtable.s = db_qtable;
-pmod_data->pcfg->db_qtable.len = strlen(db_qtable);
+pmod_data->pcfg->db_qtable.len = strlen (db_qtable);
 
 /**********
 * mohdir
@@ -141,7 +141,7 @@ pmod_data->pcfg->db_qtable.len = strlen(db_qtable);
 if (!*mohdir)
   {
   LM_ERR ("mohdir parameter not set!");
-  return (0);
+  return 0;
   }
 pmod_data->pcfg->mohdir.s = mohdir;
 pmod_data->pcfg->mohdir.len = strlen (mohdir);
@@ -155,9 +155,9 @@ if (!lstat (mohdir, psb))
 if (!bfnd)
   {
   LM_ERR ("mohdir is not a directory!");
-  return (0);
+  return 0;
   }
-return (-1);
+return -1;
 }
 
 /**********
@@ -181,17 +181,17 @@ str *pdb_url = &pmod_data->pcfg->db_url;
 if (db_bind_mod (pdb_url, pmod_data->pdb))
   {
   LM_ERR ("Unable to bind DB API using %s", pdb_url->s);
-  return (0);
+  return 0;
   }
 db_func_t *pdb = pmod_data->pdb;
 if (!DB_CAPABILITY ((*pdb), DB_CAP_ALL))
   {
   LM_ERR ("Selected database %s lacks required capabilities", pdb_url->s);
-  return (0);
+  return 0;
   }
 db1_con_t *pconn = msgq_dbconnect ();
 if (!pconn)
-  { return (0); }
+  { return 0; }
 
 /**********
 * o check schema
@@ -214,7 +214,7 @@ if (db_check_table_version (pdb, pconn,
   }
 update_msgq_lst (pconn);
 msgq_dbdisconnect (pconn);
-return (-1);
+return -1;
 
 /**********
 * close DB
@@ -222,7 +222,7 @@ return (-1);
 
 dberr:
 pdb->close (pconn);
-return (0);
+return 0;
 }
 
 /**********
@@ -237,17 +237,19 @@ int mod_child_init (int rank)
 
 {
 /**********
-* make sure DB initialized
+* o seed random number generator
+* o make sure DB initialized
 **********/
 
+srand (getpid () + time (0));
 if (rank == PROC_INIT || rank == PROC_TCP_MAIN || rank == PROC_MAIN)
-  { return (0); }
+  { return 0; }
 if (!pmod_data->pdb->init)
   {
   LM_CRIT ("DB API not loaded!");
-  return (-1);
+  return -1;
   }
-return (0);
+return 0;
 }
 
 /**********
@@ -260,7 +262,19 @@ return (0);
 void mod_destroy (void)
 
 {
+/**********
+* deallocate shared mem
+**********/
+
 LM_INFO ("???module destroy");
+if (!pmod_data)
+  { return; }
+if (pmod_data->msgq_cnt)
+  { shm_free (pmod_data->pmsgq_lst); }
+if (pmod_data->call_cnt)
+  { shm_free (pmod_data->pcall_lst); }
+shm_free (pmod_data);
+return;
 }
 
 /**********
@@ -283,7 +297,7 @@ pmod_data = (mod_data *) shm_malloc (sizeof (mod_data));
 if (!pmod_data)
   {
   LM_ERR ("Unable to allocate shared memory");
-  return (-1);
+  return -1;
   }
 memset (pmod_data, 0, sizeof (mod_data));
 if (!init_cfg ())
@@ -325,7 +339,7 @@ if (!pmod_data->fn_rtp_stream2uac)
   goto initerr;
   }
 LM_INFO ("module initialized");
-return (0);
+return 0;
 
 /**********
 * o release shared mem
@@ -337,5 +351,5 @@ if (pmod_data->msgq_cnt)
   { shm_free (pmod_data->pmsgq_lst); }
 shm_free (pmod_data);
 pmod_data = NULL;
-return (-1);
+return -1;
 }

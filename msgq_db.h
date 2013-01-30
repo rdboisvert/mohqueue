@@ -39,12 +39,23 @@
 #define MSGQCOL_MDIR  2
 #define MSGQCOL_MFILE 3
 
+/* msgqcalls columns */
+#define CALL_COLCNT   5
+#define CALLCOL_MSGQ  0
+#define CALLCOL_FROM  1
+#define CALLCOL_CALL  2
+#define CALLCOL_TAG   3
+#define CALLCOL_STATE 4
+
 /**********
 * DB function declarations
 **********/
 
+void add_call_rec (db1_con_t *, int);
+void delete_call_rec (db1_con_t *, int);
 db1_con_t *msgq_dbconnect (void);
 void msgq_dbdisconnect (db1_con_t *);
+void update_call_rec (db1_con_t *, int);
 void update_msgq_lst (db1_con_t *pconn);
 
 #if 0  /* ??? */

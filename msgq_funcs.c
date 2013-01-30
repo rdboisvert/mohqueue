@@ -34,18 +34,16 @@
 #define USRAGNT "Kamailio Message Queue"
 #define CLENHDR "Content-Length"
 
-#define PRXDLG_NEW    1
-#define PRXDLG_RING   2
-#define PRXDLG_PRACK  3
-
 /**********
 * local constants
 **********/
 
-const str MTHD_ACK = STR_STATIC_INIT ("ACK");
-const str MTHD_BYE = STR_STATIC_INIT ("BYE");
-const str MTHD_INVITE = STR_STATIC_INIT ("INVITE");
-const str MTHD_PRACK = STR_STATIC_INIT ("PRACK");
+str MTHD_ACK = STR_STATIC_INIT ("ACK");
+str MTHD_BYE = STR_STATIC_INIT ("BYE");
+str MTHD_INVITE = STR_STATIC_INIT ("INVITE");
+str MTHD_PRACK = STR_STATIC_INIT ("PRACK");
+
+str p100rel [1] = {STR_STATIC_INIT ("100rel")};
 
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
@@ -54,8 +52,15 @@ str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 * local function declarations
 **********/
 
-void invite_response_cb (struct cell *, int, struct tmcb_params *);
+int send_prov_rsp (sip_msg_t *, str *, int);
 int send_rtp_answer (sip_msg_t *, struct cell *, str *);
+int search_hdr_ext (struct hdr_field *, str *);
+
+/**********
+* local variables
+**********/
+
+db1_con_t *pconn;
 
 void print_lumps (char *hdr, char *lmpname, sip_msg_t *pmsg, struct lump *plump)//???
 
@@ -120,52 +125,13 @@ while (pos < pstr->len)
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
-* OUTPUT: 0=unable to process; 1=processed
+* OUTPUT: none
 **********/
 
-int ack_msg (sip_msg_t *pmsg, int msgq_idx)
+void ack_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
-/**********
-* o get transaction hash
-* o SDP exists?
-**********/
-
-tm_api_t *ptm = pmod_data->ptm;
-char *pfncname = "ack_msg: ";
-unsigned int hash_index;
-unsigned int hash_label;
-/* ??? respond with valid error replies */
-if (ptm->t_get_trans_ident (pmsg, &hash_index, &hash_label) < 0)
-  {
-  LM_ERR ("%sUnable to get transaction hash", pfncname);
-  return (0);
-  }
-LM_INFO ("???%shash=%d, %d", pfncname, hash_index, hash_label);
-if (!(pmsg->msg_flags & FL_SDP_BODY))
-  {
-  if (parse_sdp (pmsg))
-    {
-    LM_ERR ("%sACK lacks SDP", pfncname);
-    return (0);
-    }
-  }
-
-/**********
-* rtpproxy_answer and UAC stream
-**********/
-
-if (pmod_data->fn_rtp_answer (pmsg, NULL, NULL) != 1)
-  {
-  LM_ERR ("%srtpproxy_answer refused", pfncname);
-  return (0);
-  }
-if (pmod_data->fn_rtp_stream2uac (pmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
-  {
-  LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
-  return (0);
-  }
-return (1);
+return;
 }
 
 /**********
@@ -174,17 +140,130 @@ return (1);
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
-* OUTPUT: 0=unable to process; 1=processed
+* OUTPUT: none
 **********/
 
-int bye_msg (sip_msg_t *pmsg, int msgq_idx)
+void bye_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
 /**********
 * 
 **********/
 
-return (0);
+return;
+}
+
+/**********
+* Create New Call from CallID
+*
+* INPUT:
+*   Arg (1) = call ID str pointer
+*   Arg (2) = from str pointer
+*   Arg (3) = totag str pointer
+*   Arg (4) = queue index
+* OUTPUT: call index; -1 if unable to create
+**********/
+
+int create_call (str *pcallid, str *pfrom, str *ptotag, int msgq_idx)
+
+{
+/**********
+* o find inactive slot
+* o get more memory if needed
+**********/
+
+char *pfncname = "create_call: ";
+int nidx = pmod_data->call_cnt;
+for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+  {
+  if (!pmod_data->pcall_lst [nidx].call_active)
+    { break; }
+  }
+if (nidx == pmod_data->call_cnt)
+  {
+  if (!pmod_data->pcall_lst)
+    { pmod_data->pcall_lst = shm_malloc (sizeof (call_lst)); }
+  else
+    {
+    pmod_data->pcall_lst = shm_realloc (pmod_data->pcall_lst,
+      sizeof (call_lst) * (nidx + 1));
+    }
+  if (!pmod_data->pcall_lst)
+    {
+    LM_ERR ("%sUnable to allocate shared memory", pfncname);
+    pmod_data->call_cnt = 0;
+    return -1;
+    }
+  nidx = pmod_data->call_cnt++;
+  }
+
+/**********
+* add new entry to list
+**********/
+
+call_lst *pclst = pmod_data->pcall_lst;
+pclst [nidx].call_active = 1;
+pclst [nidx].msgq_id = msgq_idx;
+pclst [nidx].call_state = 0;
+strncpy (pclst [nidx].call_id, pcallid->s, pcallid->len);
+pclst [nidx].call_id [pcallid->len] = '\0';
+strncpy (pclst [nidx].call_from, pfrom->s, pfrom->len);
+pclst [nidx].call_from [pfrom->len] = '\0';
+strncpy (pclst [nidx].call_tag, ptotag->s, ptotag->len);
+pclst [nidx].call_tag [ptotag->len] = '\0';
+
+/**********
+* update DB
+**********/
+
+add_call_rec (pconn, nidx);
+return nidx;
+}
+
+/**********
+* Delete Call
+*
+* INPUT:
+*   Arg (1) = call index
+* OUTPUT: none
+**********/
+
+void delete_call (int ncidx)
+
+{
+/**********
+* o update DB
+* o inactivate slot
+**********/
+
+delete_call_rec (pconn, ncidx);
+pmod_data->pcall_lst [ncidx].call_active = 0;
+return;
+}
+
+/**********
+* Find Call from CallID
+*
+* INPUT:
+*   Arg (1) = call ID str pointer
+* OUTPUT: call index; -1 if unable to find
+**********/
+
+int find_call (str *pcallid)
+
+{
+int nidx;
+str tmpstr;
+for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+  {
+  if (!pmod_data->pcall_lst [nidx].call_active)
+    { continue; }
+  tmpstr.s = pmod_data->pcall_lst [nidx].call_id;
+  tmpstr.len = strlen (tmpstr.s);
+  if (!STR_EQ (tmpstr, *pcallid))
+    { return nidx; }
+  }
+return -1;
 }
 
 /**********
@@ -211,7 +290,7 @@ do
   for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)
     {
     if (!strcmp (pqlst [nidx].msgq_uri, uri))
-      { return (nidx); }
+      { return nidx; }
     }
   pfnd = strchr (uri, ';');
   if (!pfnd)
@@ -219,7 +298,7 @@ do
   *pfnd = '\0';
   }
 while (1);
-return (-1);
+return -1;
 }
 
 /**********
@@ -228,24 +307,35 @@ return (-1);
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
-* OUTPUT: 0=unable to process; 1=processed
+* OUTPUT: none
 **********/
 
-int first_invite_msg (sip_msg_t *pmsg, int msgq_idx)
+void first_invite_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
+/**********
+* o get call ID
+* o record exists?
+**********/
+
+char *pfncname = "first_invite_msg: ";
+tm_api_t *ptm = pmod_data->ptm;
+int ncall_idx = find_call (&pmsg->callid->body);
+if (ncall_idx != -1)
+  {
+  //??? need to destroy
+  }
+
 /**********
 * o create new transaction
 * o SDP exists?
 * o send rtpproxy offer
 **********/
 
-char *pfncname = "first_invite_msg: ";
-tm_api_t *ptm = pmod_data->ptm;
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
-  return (1);
+  return;
   }
 if (!(pmsg->msg_flags & FL_SDP_BODY))
   {
@@ -254,7 +344,7 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     LM_ERR ("%sINVITE lacks SDP", pfncname);
     if (ptm->t_reply (pmsg, 603, "INVITE lacks SDP") < 0)
       { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
-    return (1);
+    return;
     }
   }
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
@@ -262,231 +352,67 @@ if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   LM_ERR ("%srtpproxy_offer refused", pfncname);
   if (ptm->t_reply (pmsg, 503, "Unable to proxy INVITE") < 0)
     { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
-  return (1);
+  return;
   }
 
 /**********
-* extract
-* o Via
-* o From
-* o CSeq
-* o Call-ID
-* o Record-Route
-* o Supported
-* o Allow
+* create call record
 **********/
 
-#if 0 /* ??? */
-if (pmod_data->prr->record_route (pmsg, 0)) /* ??? not working */
-  {
-  LM_ERR ("%sUnable to add record route", pfncname);
-  return (0);
-  }
-#endif /* ??? */
-
-/**********
-* o send working response
-* o init dialog
-* o create totag, SDP and headers
-**********/
-
-struct cell *ptrans = ptm->t_gett ();
-if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
-  {
-  LM_ERR ("%sUnable to reply to INVITE", pfncname);
-  return (1);
-  }
-pmod_data->pmsgq_lst [msgq_idx].dlg = PRXDLG_NEW;
-LM_INFO ("%sdialog state=NEW", pfncname);//???
 str ptotag [1] = {STR_NULL};
 if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
   {
   LM_ERR ("%sUnable to create totag", pfncname);
-  return (1);
+  return;
   }
-str pbody [1] = {STR_STATIC_INIT ("v=0" SIPEOL
-"o=- 1167618058 1167618058 IN IP4 10.211.64.5" SIPEOL
-"s=" USRAGNT SIPEOL
-"c=IN IP4 10.211.64.12" SIPEOL
-"t=0 0" SIPEOL
-"a=sendrecv" SIPEOL
-"m=audio 2230 RTP/AVP 9 127" SIPEOL
-"a=rtpmap:9 G722/8000" SIPEOL
-"a=rtpmap:127 telephone-event/8000" SIPEOL)};
-str pnewhdr [1] = {STR_STATIC_INIT (
-//"Allow: INVITE, ACK, BYE, CANCEL, MESSAGE, SUBSCRIBE, NOTIFY, REFER" SIPEOL
-"Accept-Language: en" SIPEOL
-"Allow-Events: conference,talk,hold" SIPEOL
-//"Content-Type: application/sdp" SIPEOL
-"Require: 100rel" SIPEOL
-"RSeq: 8193" SIPEOL
-"User-Agent: " USRAGNT SIPEOL)};
+ncall_idx = create_call (&pmsg->callid->body, &pmsg->from->body, ptotag, msgq_idx);
+if (ncall_idx != -1)
+  { return; }
 
 /**********
-* o register callback to intercept reply
-* o send ringing reply
-* o update dialog state
+* o send working response
+* o supports/requires PRACK? (RFC 3262 section 3)
+* o exit if not ringing
 **********/
 
-#if 0 //???
-if (ptm->register_tmcb (0, ptrans, TMCB_E2EACK_IN | TMCB_ON_FAILURE,
-  invite_response_cb, 0, 0) < 0)
+if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
   {
-  LM_ERR ("%sUnable to create callback", pfncname);
-  return (1);
+  LM_ERR ("%sUnable to reply to INVITE", pfncname);
+  delete_call (ncall_idx);
+  return;
   }
-#endif //???
-pmod_data->pmsgq_lst [msgq_idx].hash_index = ptrans->hash_index;
-pmod_data->pmsgq_lst [msgq_idx].hash_label = ptrans->label;
-if (ptm->t_reply_with_body
-  (ptrans, 180, presp_ring, pbody, pnewhdr, ptotag) < 0)
-  {
-  LM_ERR ("%sUnable to create reply", pfncname);
-  return (1);
-  }
-pmod_data->pmsgq_lst [msgq_idx].dlg = PRXDLG_RING;
-LM_INFO ("%sdialog state=RING", pfncname);//???
-
-/**********
-* wait until dialog finished
-**********/
-
-while (1)
-  {
-  sleep (1);
-  if (pmod_data->pmsgq_lst [msgq_idx].dlg != PRXDLG_RING)
-    { break; }
-  LM_INFO ("%sStill waiting", pfncname);
-  }
-if (pmod_data->pmsgq_lst [msgq_idx].dlg != PRXDLG_PRACK)
-  { LM_ERR ("%sConnection failed", pfncname); }
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+if (search_hdr_ext (pmsg->supported, p100rel)
+  || search_hdr_ext (pmsg->require, p100rel))
+  { send_prov_rsp (pmsg, ptotag, ncall_idx); }
 else
   {
-  /**********
-  * since t_reply_with_body takes the shortcut of unreferencing the
-  * transaction we have to create a SIP body send it through rtpproxy
-  * and then use the result to build the final response
-  **********/
-
-  if (!send_rtp_answer (pmsg, ptrans, ptotag))
-    { LM_ERR ("%sUnable to final reply to INVITE", pfncname); }
+  if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
+    { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
   else
-    { LM_INFO ("%sdialog state=CONFIRMED", pfncname); } //???
+    {
+    pcall->call_state = CLSTA_RING;
+    update_call_rec (pconn, ncall_idx);
+    }
   }
-pmod_data->pmsgq_lst [msgq_idx].hash_index = 0;
-pmod_data->pmsgq_lst [msgq_idx].hash_label = 0;
-pmod_data->pmsgq_lst [msgq_idx].dlg = 0;
-return (1);
-}
-
-/**********
-* Invite Response Callback
-*
-* INPUT:
-*   Arg (1) = cell pointer
-*   Arg (2) = callback type
-*   Arg (3) = callback parameters
-* OUTPUT: none
-**********/
-
-void invite_response_cb (struct cell *ptrans, int type, struct tmcb_params *ptparms)
-
-{
-/**********
-* rtpproxy_answer and UAC stream
-**********/
-
-char *pfncname = "invite_response_cb: ";
-char *ptype;
-switch (type)
+if (pcall->call_state != CLSTA_RING)
   {
-  case TMCB_REQUEST_IN:
-    ptype = "REQUEST_IN";
-    break;
-  case TMCB_RESPONSE_IN:
-    ptype = "RESPONSE_IN";
-    break;
-  case TMCB_E2EACK_IN:
-    ptype = "E2EACK_IN";
-    break;
-  case TMCB_REQUEST_PENDING:
-    ptype = "REQUEST_PENDING";
-    break;
-  case TMCB_REQUEST_FWDED:
-    ptype = "REQUEST_FWDED";
-    break;
-  case TMCB_RESPONSE_FWDED:
-    ptype = "RESPONSE_FWDED";
-    break;
-  case TMCB_ON_FAILURE_RO:
-    ptype = "ON_FAILURE_RO";
-    break;
-  case TMCB_ON_FAILURE:
-    ptype = "ON_FAILURE";
-    break;
-  case TMCB_REQUEST_OUT:
-    ptype = "REQUEST_OUT";
-    break;
-  case TMCB_RESPONSE_OUT:
-    ptype = "RESPONSE_OUT";
-    break;
-  case TMCB_LOCAL_COMPLETED:
-    ptype = "LOCAL_COMPLETED";
-    break;
-  case TMCB_LOCAL_RESPONSE_OUT:
-    ptype = "LOCAL_RESPONSE_OUT";
-    break;
-  case TMCB_ACK_NEG_IN:
-    ptype = "ACK_NEG_IN";
-    break;
-  case TMCB_REQ_RETR_IN:
-    ptype = "REQ_RETR_IN";
-    break;
-  case TMCB_LOCAL_RESPONSE_IN:
-    ptype = "LOCAL_RESPONSE_IN";
-    break;
-  case TMCB_LOCAL_REQUEST_IN:
-    ptype = "LOCAL_REQUEST_IN";
-    break;
-  case TMCB_DLG:
-    ptype = "DLG";
-    break;
-  case TMCB_DESTROY:
-    ptype = "DESTROY";
-    break;
-  case TMCB_E2ECANCEL_IN:
-    ptype = "E2ECANCEL_IN";
-    break;
-  case TMCB_E2EACK_RETR_IN:
-    ptype = "E2EACK_RETR_IN";
-    break;
-  case TMCB_RESPONSE_READY:
-    ptype = "RESPONSE_READY";
-    break;
-  case TMCB_REQUEST_SENT:
-    ptype = "REQUEST_SENT";
-    break;
-  case TMCB_RESPONSE_SENT:
-    ptype = "RESPONSE_SENT";
-    break;
-  default:
-    ptype = "UNKNOWN";
-  }
-LM_INFO ("???%sresponse=%x, %s", pfncname, type, ptype);
-#if 0 //???
-sip_msg_t *pmsg = ptparms->rpl;
-if (pmod_data->fn_rtp_answer (pmsg, NULL, NULL) != 1)
-  {
-  LM_ERR ("%srtpproxy_answer refused", pfncname);
+  delete_call (ncall_idx);
   return;
   }
-if (pmod_data->fn_rtp_stream2uac (pmsg, "/var/build/music_on_hold", (char *)-1) != 1) /* ??? */
-  {
-  LM_ERR ("%srtpproxy_stream2uac refused", pfncname);
-  return;
-  }
-LM_INFO ("???rtp answer and stream2uac");
-#endif //???
+
+/**********
+* since t_reply_with_body takes the shortcut of unreferencing the
+* transaction we have to create a SIP body send it through rtpproxy
+* and then use the result to build the final response
+**********/
+
+struct cell *ptrans = ptm->t_gett ();
+if (!send_rtp_answer (pmsg, ptrans, ptotag))
+  { pcall->call_state = CLSTA_ERR; }
+else
+  { pcall->call_state = CLSTA_INQUEUE; }
+update_call_rec (pconn, ncall_idx);
 return;
 }
 
@@ -496,44 +422,50 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
-* OUTPUT: 0=unable to process; 1=processed
+* OUTPUT: none
 **********/
 
-int prack_msg (sip_msg_t *pmsg, int msgq_idx)
+void prack_msg (sip_msg_t *pmsg, int msgq_idx)
 
 {
 /**********
-* part of existing dialog?
+* o get call ID
+* o record exists?
 **********/
 
 char *pfncname = "prack_msg: ";
 tm_api_t *ptm = pmod_data->ptm;
-unsigned int hash_index = pmod_data->pmsgq_lst [msgq_idx].hash_index;
-unsigned int hash_label = pmod_data->pmsgq_lst [msgq_idx].hash_label;
-if (!hash_index && !hash_label)
+int ncall_idx = find_call (&pmsg->callid->body);
+if (ncall_idx == -1)
   {
   LM_ERR ("%sNot part of existing transaction", pfncname);
-  return (1);
+  return;
   }
 
 /**********
-* o accept PRACK
-* o update dialog state
+* check RAck???
 **********/
 
+/**********
+* o accept PRACK
+* o update call state
+**********/
+
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
-  return (1);
+  pcall->call_state = CLSTA_ERR;
   }
-if (!ptm->t_reply (pmsg, 200, "OK"))
+else if (!ptm->t_reply (pmsg, 200, "OK"))
   {
   LM_ERR ("%sUnable to reply to PRACK", pfncname);
-  return (1);
+  pcall->call_state = CLSTA_ERR;
   }
-pmod_data->pmsgq_lst [msgq_idx].dlg = PRXDLG_PRACK;
-LM_INFO ("%sdialog state=PRACK OK", pfncname);//???
-return (1);
+else
+  { pcall->call_state = CLSTA_PRINGACK; }
+update_call_rec (pconn, ncall_idx);
+return;
 }
 
 /**********
@@ -543,17 +475,17 @@ return (1);
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
 *   Arg (3) = tag string pointer
-* OUTPUT: 0=unable to process; 1=processed
+* OUTPUT: none
 **********/
 
-int reinvite_msg (sip_msg_t *pmsg, int msgq_idx, str *tag_value)
+void reinvite_msg (sip_msg_t *pmsg, int msgq_idx, str *tag_value)
 
 {
 /**********
 * 
 **********/
 
-return (0);
+return;
 }
 
 /**********
@@ -571,11 +503,11 @@ char *pcstr = malloc (pstr->len + 1);
 if (!pcstr)
   {
   LM_ERR ("Unable to allocate local memory!");
-  return (NULL);
+  return NULL;
   }
 memcpy (pcstr, pstr->s, pstr->len);
 pcstr [pstr->len] = 0;
-return (pcstr);
+return pcstr;
 }
 
 /**********
@@ -612,7 +544,7 @@ int msgq_count_fixup (void **param, int param_no)
 /*
 LM_INFO ("???msgq_count_fixup ()");
 */
-return (1);
+return 1;
 }
 
 /**********
@@ -625,7 +557,7 @@ int msgq_redirect_fixup (void **param, int param_no)
 /*
 LM_INFO ("???msgq_redirect_fixup ()");
 */
-return (1);
+return 1;
 }
 
 /**********
@@ -642,7 +574,7 @@ int msgq_count (sip_msg_t *msg, char *p1, char *p2)
 /*
 LM_INFO ("???msgq_count ()");
 */
-return (1);
+return 1;
 }
 
 /**********
@@ -650,71 +582,71 @@ return (1);
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = ???
-*   Arg (3) = ???
+*   Arg (2) = ignore
+*   Arg (3) = ignore
 * OUTPUT: none
 **********/
 
 int msgq_process (sip_msg_t *pmsg, char *p1, char *p2)
 
 {
-/*
-LM_INFO ("???msgq_process ()");
-*/
-db1_con_t *pconn = msgq_dbconnect (); /* ??? */
-if (pconn)
-  {
-  update_msgq_lst (pconn);
-  msgq_dbdisconnect (pconn);
-  }
-
 /**********
 * o parse headers
 * o directed to message queue?
+* o connect to database
 **********/
 
 if (parse_headers (pmsg, HDR_EOH_F, 0) < 0)
   {
   LM_ERR ("Unable to parse header!");
-  return (0);
+  return 0;
   }
 to_body_t *pto_body = get_to (pmsg);
 char *tmpstr = form_tmpstr (&pto_body->uri);
 if (!tmpstr)
-  { return (0); }
+  { return 0; }
 int msgq_idx = find_msgq_id (tmpstr);
 free_tmpstr (tmpstr);
 if (msgq_idx < 0)
-  { return (0); }
+  { return 0; }
+pconn = msgq_dbconnect ();
+if (pconn)
+  { update_msgq_lst (pconn); }
+else
+  { LM_WARN ("Unable to connect to DB"); }
 
 /**********
-* check if
-* o INVITE
-* o PRACK
-* o ACK
-* o BYE
+* process message
 **********/
 
 str smethod = REQ_LINE (pmsg).method;
 LM_INFO ("???%.*s: [%d]%s", STR_FMT (&smethod),
   msgq_idx, pmod_data->pmsgq_lst [msgq_idx].msgq_uri);
-if (STR_EQ (smethod, MTHD_INVITE))
+switch (pmsg->REQ_METHOD)
   {
-  /**********
-  * initial INVITE?
-  **********/
+  case METHOD_INVITE:
+    /**********
+    * initial INVITE?
+    **********/
 
-  if (!pto_body->tag_value.len)
-    { return (first_invite_msg (pmsg, msgq_idx)); }
-  return (reinvite_msg (pmsg, msgq_idx, &pto_body->tag_value));
+    if (!pto_body->tag_value.len)
+      { first_invite_msg (pmsg, msgq_idx); }
+    else
+      { reinvite_msg (pmsg, msgq_idx, &pto_body->tag_value); }
+    break;
+  case METHOD_PRACK:
+    prack_msg (pmsg, msgq_idx);
+    break;
+  case METHOD_ACK:
+    ack_msg (pmsg, msgq_idx);
+    break;
+  case METHOD_BYE:
+    bye_msg (pmsg, msgq_idx);
+    break;
   }
-if (STR_EQ (smethod, MTHD_PRACK))
-  { return (prack_msg (pmsg, msgq_idx)); }
-if (STR_EQ (smethod, MTHD_ACK))
-  { return (ack_msg (pmsg, msgq_idx)); }
-if (STR_EQ (smethod, MTHD_BYE))
-  { return (bye_msg (pmsg, msgq_idx)); }
-return (0);
+if (pconn)
+  { msgq_dbdisconnect (pconn); }
+return 1;
 }
 
 /**********
@@ -727,7 +659,111 @@ int msgq_redirect (sip_msg_t *msg, char *p1, char *p2)
 /*
 LM_INFO ("???msgq_redirect ()");
 */
-return (1);
+return 1;
+}
+
+/**********
+* Search Header for Extension
+*
+* INPUT:
+*   Arg (1) = header field pointer
+*   Arg (2) = extension str pointer
+* OUTPUT: 0=not found
+**********/
+
+int search_hdr_ext (struct hdr_field *phdr, str *pext)
+
+{
+if (!phdr)
+  { return 0; }
+str *pstr = &phdr->body;
+int npos1, npos2;
+for (npos1 = 0; npos1 < pstr->len; npos1++)
+  {
+  /**********
+  * o find non-space
+  * o search to end, space or comma
+  * o same size?
+  * o same name?
+  **********/
+
+  if (pstr->s [npos1] == ' ')
+    { continue; }
+  for (npos2 = npos1++; npos1 < pstr->len; npos1++)
+    {
+    if (pstr->s [npos1] == ' ' || pstr->s [npos1] == ',')
+      { break; }
+    }
+  if (npos1 - npos2 != pext->len)
+    { continue; }
+  if (!strncasecmp (&pstr->s [npos2], pext->s, pext->len))
+    { return 1; }
+  }
+return 0;
+}
+
+/**********
+* Send Provisional Response
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = totag str pointer
+*   Arg (3) = call index
+* OUTPUT: 0=unable to process; 1=processed
+**********/
+
+int send_prov_rsp (sip_msg_t *pmsg, str *ptotag, int ncall_idx)
+
+{
+/**********
+* o send ringing response with require
+* o update record
+**********/
+
+char *pfncname = "send_prov_rsp: ";
+tm_api_t *ptm = pmod_data->ptm;
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+struct cell *ptrans = ptm->t_gett ();
+pcall->call_rseq = rand ();
+char phdrtmp [200];
+char phdrtmplt [] =
+  "Accept-Language: en" SIPEOL
+  "Allow-Events: conference,talk,hold" SIPEOL
+  "Require: 100rel" SIPEOL
+  "RSeq: %d" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  ;
+sprintf (phdrtmp, phdrtmplt, pcall->call_rseq);
+str phdr [1];
+phdr->s = phdrtmp;
+phdr->len = strlen (phdrtmp);
+str pbody [1] = {STR_NULL};
+if (ptm->t_reply_with_body
+  (ptrans, 180, presp_ring, pbody, phdr, ptotag) < 0)
+  {
+  LM_ERR ("%sUnable to create reply", pfncname);
+  return 0;
+  }
+pcall->call_state = CLSTA_PRING;
+update_call_rec (pconn, ncall_idx);
+
+/**********
+* wait until PRACK acknowledged
+**********/
+
+while (1)
+  {
+  usleep (200);
+  if (pcall->call_state != CLSTA_PRING)
+    { break; }
+//need to resend RING if no response???
+  }
+if (pcall->call_state == CLSTA_PRINGACK)
+  {
+  pcall->call_state = CLSTA_RING;
+  update_call_rec (pconn, ncall_idx);
+  }
+return 1;
 }
 
 /**********
@@ -765,7 +801,7 @@ if (!pbuf->s || !pbuf->len)
 **********/
 
 char pclenhdr [] = CLENHDR;
-str pparse [20]; /* should be enough */
+str pparse [20];
 int npos1, npos2;
 int nhdrcnt = 0;
 for (npos1 = 0; npos1 < pbuf->len; npos1++)
@@ -913,7 +949,7 @@ if (pmod_data->fn_rtp_stream2uac (pnmsg, (char *)pmodel, (char *)-1) != 1) /* ??
 **********/
 
 pkg_free (pbuf->s);
-pbuf->s = build_res_buf_from_sip_res (pnmsg, &(unsinged int)pbuf->len);
+pbuf->s = build_res_buf_from_sip_res (pnmsg, (unsigned int *)&pbuf->len);
 if (!pbuf->s || !pbuf->len)
   {
   LM_ERR ("%sUnable to build new response", pfncname);
@@ -949,5 +985,5 @@ nrc = 1;
 answer_done:
 if (pbuf->s)
   { pkg_free (pbuf->s); }
-return (nrc);
+return nrc;
 }

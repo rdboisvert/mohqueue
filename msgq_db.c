@@ -29,10 +29,10 @@
 * msgqueue definitions
 **********/
 
-const str MSGQCSTR_ID = STR_STATIC_INIT ("id");
-const str MSGQCSTR_URI = STR_STATIC_INIT ("msgq_uri");
-const str MSGQCSTR_MDIR = STR_STATIC_INIT ("msgq_mohdir");
-const str MSGQCSTR_MFILE = STR_STATIC_INIT ("msgq_mohfile");
+str MSGQCSTR_ID = STR_STATIC_INIT ("id");
+str MSGQCSTR_URI = STR_STATIC_INIT ("msgq_uri");
+str MSGQCSTR_MDIR = STR_STATIC_INIT ("msgq_mohdir");
+str MSGQCSTR_MFILE = STR_STATIC_INIT ("msgq_mohfile");
 
 static str *msgq_columns [] =
   {
@@ -44,8 +44,200 @@ static str *msgq_columns [] =
   };
 
 /**********
+* msgqcalls definitions
+**********/
+
+str CALLCSTR_MSGQ = STR_STATIC_INIT ("msgq_id");
+str CALLCSTR_FROM = STR_STATIC_INIT ("call_from");
+str CALLCSTR_CALL = STR_STATIC_INIT ("call_id");
+str CALLCSTR_TAG = STR_STATIC_INIT ("call_tag");
+str CALLCSTR_STATE = STR_STATIC_INIT ("call_state");
+
+static str *call_columns [] =
+  {
+  &CALLCSTR_MSGQ,
+  &CALLCSTR_FROM,
+  &CALLCSTR_CALL,
+  &CALLCSTR_TAG,
+  &CALLCSTR_STATE,
+  NULL
+  };
+
+/**********
+* local function declarations
+**********/
+
+void set_call_key (db_key_t *, int, int);
+void set_call_val (db_val_t *, int, int, void *);
+
+/**********
+* local functions
+**********/
+
+/**********
+* Fill Call Keys
+*
+* INPUT:
+*   Arg (1) = row pointer
+* OUTPUT: none
+**********/
+
+void fill_call_keys (db_key_t *prkeys)
+
+{
+set_call_key (prkeys, CALLCOL_MSGQ, CALLCOL_MSGQ);
+set_call_key (prkeys, CALLCOL_FROM, CALLCOL_FROM);
+set_call_key (prkeys, CALLCOL_CALL, CALLCOL_CALL);
+set_call_key (prkeys, CALLCOL_TAG, CALLCOL_TAG);
+set_call_key (prkeys, CALLCOL_STATE, CALLCOL_STATE);
+return;
+}
+
+/**********
+* Fill Call Values
+*
+* INPUT:
+*   Arg (1) = row pointer
+*   Arg (2) = call struct pointer
+* OUTPUT: none
+**********/
+
+void fill_call_vals (db_val_t *prvals, call_lst *pcall)
+
+{
+set_call_val (prvals, CALLCOL_MSGQ, CALLCOL_MSGQ, &pcall->msgq_id);
+set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
+set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
+set_call_val (prvals, CALLCOL_TAG, CALLCOL_TAG, pcall->call_tag);
+set_call_val (prvals, CALLCOL_STATE, CALLCOL_STATE, &pcall->call_state);
+return;
+}
+
+/**********
+* Set Call Column Key
+*
+* INPUT:
+*   Arg (1) = row pointer
+*   Arg (2) = column number
+*   Arg (3) = column id
+* OUTPUT: none
+**********/
+
+void set_call_key (db_key_t *prkeys, int ncol, int ncolid)
+
+{
+prkeys [ncol] = call_columns [ncolid];
+return;
+}
+
+/**********
+* Set Call Column Value
+*
+* INPUT:
+*   Arg (1) = row pointer
+*   Arg (2) = column number
+*   Arg (3) = column id
+*   Arg (4) = value pointer
+* OUTPUT: none
+**********/
+
+void set_call_val (db_val_t *prvals, int ncol, int ncolid, void *pdata)
+
+{
+/**********
+* fill based on column
+**********/
+
+switch (ncolid)
+  {
+  case CALLCOL_MSGQ:
+  case CALLCOL_STATE:
+    prvals [ncol].val.int_val = *((int *)pdata);
+    prvals [ncol].type = DB1_INT;
+    prvals [ncol].nul = 0;
+    break;
+  case CALLCOL_CALL:
+  case CALLCOL_FROM:
+  case CALLCOL_TAG:
+    prvals [ncol].val.string_val = (char *)pdata;
+    prvals [ncol].type = DB1_STRING;
+    prvals [ncol].nul = 0;
+    break;
+  }
+return;
+}
+
+/**********
 * external functions
 **********/
+
+/**********
+* Add Call Record
+*
+* INPUT:
+*   Arg (1) = connection pointer
+*   Arg (2) = call index
+* OUTPUT: none
+**********/
+
+void add_call_rec (db1_con_t *pconn, int ncidx)
+
+{
+/**********
+* o fill column names and values
+* o insert new record
+**********/
+
+char *pfncname = "add_call_rec: ";
+if (!pconn)
+  { return; }
+db_func_t *pdb = pmod_data->pdb;
+pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
+db_key_t prkeys [CALL_COLCNT];
+fill_call_keys (prkeys);
+db_val_t prvals [CALL_COLCNT];
+fill_call_vals (prvals, &pmod_data->pcall_lst [ncidx]);
+if (pdb->insert (pconn, prkeys, prvals, MSGQ_COLCNT) < 0)
+  {
+  LM_WARN ("%sUnable to add new row to %s", pfncname,
+    pmod_data->pcfg->db_qtable.s);
+  }
+return;
+}
+
+/**********
+* Delete Call Record
+*
+* INPUT:
+*   Arg (1) = connection pointer
+*   Arg (2) = call index
+* OUTPUT: none
+**********/
+
+void delete_call_rec (db1_con_t *pconn, int ncidx)
+
+{
+/**********
+* o setup to delete based on call ID
+* o delete record
+**********/
+
+char *pfncname = "delete_call_rec: ";
+if (!pconn)
+  { return; }
+db_func_t *pdb = pmod_data->pdb;
+pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
+db_key_t prkeys [1];
+set_call_key (prkeys, 0, CALLCOL_CALL);
+db_val_t prvals [1];
+set_call_val (prvals, 0, CALLCOL_CALL, pmod_data->pcall_lst [ncidx].call_id);
+if (pdb->delete (pconn, prkeys, NULL, prvals, 0) < 0)
+  {
+  LM_WARN ("%sUnable to delete row from %s", pfncname,
+    pmod_data->pcfg->db_qtable.s);
+  }
+return;
+}
 
 /**********
 * Connect to DB
@@ -61,7 +253,7 @@ str *pdb_url = &pmod_data->pcfg->db_url;
 db1_con_t *pconn = pmod_data->pdb->init (pdb_url);
 if (!pconn)
   { LM_ERR ("Unable to connect to DB %s", pdb_url->s); }
-return (pconn);
+return pconn;
 }
 
 /**********
@@ -76,6 +268,45 @@ void msgq_dbdisconnect (db1_con_t *pconn)
 
 {
 pmod_data->pdb->close (pconn);
+return;
+}
+
+/**********
+* Update Call Record
+*
+* INPUT:
+*   Arg (1) = connection pointer
+*   Arg (2) = call index
+* OUTPUT: none
+**********/
+
+void update_call_rec (db1_con_t *pconn, int ncidx)
+
+{
+/**********
+* o setup to update based on call ID
+* o update record
+**********/
+
+char *pfncname = "update_call_rec: ";
+if (!pconn)
+  { return; }
+db_func_t *pdb = pmod_data->pdb;
+call_lst *pcall = &pmod_data->pcall_lst [ncidx];
+pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
+db_key_t pqkeys [1];
+set_call_key (pqkeys, 0, CALLCOL_CALL);
+db_val_t pqvals [1];
+set_call_val (pqvals, 0, CALLCOL_CALL, pcall->call_id);
+db_key_t pukeys [CALL_COLCNT];
+fill_call_keys (pukeys);
+db_val_t puvals [CALL_COLCNT];
+fill_call_vals (puvals, pcall);
+if (pdb->update (pconn, pqkeys, NULL, pqvals, pukeys, puvals, 1, CALL_COLCNT) < 0)
+  {
+  LM_WARN ("%sUnable to update row in %s", pfncname,
+    pmod_data->pcfg->db_qtable.s);
+  }
 return;
 }
 
@@ -95,17 +326,19 @@ void update_msgq_lst (db1_con_t *pconn)
 * o read queues from table
 **********/
 
+if (!pconn)
+  { return; }
 db_func_t *pdb = pmod_data->pdb;
 msgq_lst *pqlst = pmod_data->pmsgq_lst;
 int nidx;
 for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)
   { pqlst [nidx].msgq_flag &= ~MSGQF_CHK; }
 pdb->use_table (pconn, &pmod_data->pcfg->db_qtable);
-db_key_t prcols [MSGQ_COLCNT];
+db_key_t prkeys [MSGQ_COLCNT];
 for (nidx = 0; nidx < MSGQ_COLCNT; nidx++)
-  { prcols [nidx] = msgq_columns [nidx]; }
+  { prkeys [nidx] = msgq_columns [nidx]; }
 db1_res_t *presult = NULL;
-if (pdb->query (pconn, NULL, NULL, NULL, prcols, 0, MSGQ_COLCNT, 0, &presult))
+if (pdb->query (pconn, NULL, NULL, NULL, prkeys, 0, MSGQ_COLCNT, 0, &presult))
   {
   LM_ERR ("update_msgq_lst: table query (%s) failed",
     pmod_data->pcfg->db_qtable.s);
@@ -114,6 +347,8 @@ if (pdb->query (pconn, NULL, NULL, NULL, prcols, 0, MSGQ_COLCNT, 0, &presult))
 db_row_t *prows = RES_ROWS (presult);
 int nrows = RES_ROW_N (presult);
 db_val_t *prowvals = NULL;
+char *ptext, *puri;
+msgq_lst *pnewlst;
 for (nidx = 0; nidx < nrows; nidx++)
   {
   /**********
@@ -121,7 +356,7 @@ for (nidx = 0; nidx < nrows; nidx++)
   **********/
 
   prowvals = ROW_VALUES (prows + nidx);
-  char *puri = VAL_STRING (prowvals + MSGQCOL_URI);
+  puri = VAL_STRING (prowvals + MSGQCOL_URI);
   int bfnd = 0;
   int nidx2;
   for (nidx2 = 0; nidx2 < pmod_data->msgq_cnt; nidx2++)
@@ -133,7 +368,7 @@ for (nidx = 0; nidx < nrows; nidx++)
       * o mark as found
       **********/
 
-      char *ptext = VAL_STRING (prowvals + MSGQCOL_MDIR);
+      ptext = VAL_STRING (prowvals + MSGQCOL_MDIR);
       if (strcmp (pqlst [nidx2].msgq_mohdir, ptext))
         {
         strcpy (pqlst [nidx2].msgq_mohdir, ptext);
@@ -166,7 +401,7 @@ for (nidx = 0; nidx < nrows; nidx++)
     **********/
 
     int nsize = pmod_data->msgq_cnt + 1;
-    msgq_lst *pnewlst = (msgq_lst *) shm_malloc (sizeof (msgq_lst) * nsize);
+    pnewlst = (msgq_lst *) shm_malloc (sizeof (msgq_lst) * nsize);
     if (!pnewlst)
       {
       LM_ERR ("Unable to allocate shared memory");
@@ -221,145 +456,3 @@ for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)
   }
 return;
 }
-
-#if 0  /* ??? */
-db1_con_t *sca_db_con = NULL;
-
-const str SCA_DB_SUBSCRIBER_COL_NAME = STR_STATIC_INIT ("subscriber");
-const str SCA_DB_AOR_COL_NAME  = STR_STATIC_INIT ("aor");
-const str SCA_DB_EVENT_COL_NAME = STR_STATIC_INIT ("event");
-const str SCA_DB_EXPIRES_COL_NAME = STR_STATIC_INIT ("expires");
-const str SCA_DB_STATE_COL_NAME = STR_STATIC_INIT ("state");
-const str SCA_DB_APP_IDX_COL_NAME = STR_STATIC_INIT ("app_idx");
-const str SCA_DB_CALL_ID_COL_NAME = STR_STATIC_INIT ("call_id");
-const str SCA_DB_FROM_TAG_COL_NAME = STR_STATIC_INIT ("from_tag");
-const str SCA_DB_TO_TAG_COL_NAME = STR_STATIC_INIT ("to_tag");
-const str SCA_DB_RECORD_ROUTE_COL_NAME = STR_STATIC_INIT ("record_route");
-const str SCA_DB_NOTIFY_CSEQ_COL_NAME = STR_STATIC_INIT ("notify_cseq");
-const str SCA_DB_SUBSCRIBE_CSEQ_COL_NAME = STR_STATIC_INIT ("subscribe_cseq");
-
-void sca_db_subscriptions_get_value_for_column (int column, db_val_t *row_values,
-  void *column_value)
-{
-assert (column_value != NULL);
-assert (row_values != NULL);
-assert (column >= 0 && column < SCA_DB_SUBS_BOUNDARY);
-
-switch (column) {
-    case SCA_DB_SUBS_SUBSCRIBER_COL:
-    case SCA_DB_SUBS_AOR_COL:
-    case SCA_DB_SUBS_CALL_ID_COL:
-    case SCA_DB_SUBS_FROM_TAG_COL:
-    case SCA_DB_SUBS_TO_TAG_COL:
-    case SCA_DB_SUBS_RECORD_ROUTE_COL:
-	((str *)column_value)->s = (char *)row_values[ column ].val.string_val;
-	((str *)column_value)->len = strlen(((str *)column_value)->s);
-	break;
-
-    case SCA_DB_SUBS_EXPIRES_COL:
-	*((time_t *)column_value) = row_values[ column ].val.time_val;
-	break;
-
-    case SCA_DB_SUBS_EVENT_COL:
-    case SCA_DB_SUBS_STATE_COL:
-    case SCA_DB_SUBS_NOTIFY_CSEQ_COL:
-    case SCA_DB_SUBS_SUBSCRIBE_CSEQ_COL:
-	*((int *)column_value) = row_values[ column ].val.int_val;
-	break;
-
-    default:
-	column_value = NULL;
-    }
-}
-
-void sca_db_subscriptions_set_value_for_column (int column, db_val_t *row_values,
-  void *column_value)
-{
-assert (column >= 0 && column < SCA_DB_SUBS_BOUNDARY);
-assert (column_value != NULL);
-assert (row_values != NULL);
-switch (column) {
-  case SCA_DB_SUBS_SUBSCRIBER_COL:
-  case SCA_DB_SUBS_AOR_COL:
-  case SCA_DB_SUBS_CALL_ID_COL:
-  case SCA_DB_SUBS_FROM_TAG_COL:
-  case SCA_DB_SUBS_TO_TAG_COL:
-  case SCA_DB_SUBS_RECORD_ROUTE_COL:
-    row_values[ column ].val.str_val = *((str *)column_value);
-    row_values[ column ].type = DB1_STR;
-    row_values[ column ].nul = 0;
-    break;
-
-    case SCA_DB_SUBS_EXPIRES_COL:
-	row_values[ column ].val.int_val = (int)(*((time_t *)column_value));
-	row_values[ column ].type = DB1_INT;
-	row_values[ column ].nul = 0;
-	break;
-
-    case SCA_DB_SUBS_APP_IDX_COL:
-	/* for now, don't save appearance index associated with subscriber */
-	row_values[ column ].val.int_val = 0;
-	row_values[ column ].type = DB1_INT;
-	row_values[ column ].nul = 0;
-	break;
-
-    default:
-	LM_WARN ("sca_db_subscriptions_set_value_for_column: unrecognized "
-		 "column index %d, treating as INT", column);
-	/* fall through */
-
-    case SCA_DB_SUBS_EVENT_COL:
-    case SCA_DB_SUBS_STATE_COL:
-    case SCA_DB_SUBS_NOTIFY_CSEQ_COL:
-    case SCA_DB_SUBS_SUBSCRIBE_CSEQ_COL:
-	row_values[ column ].val.int_val = *((int *)column_value);
-	row_values[ column ].type = DB1_INT;
-	row_values[ column ].nul = 0;
-	break;
-    }
-}
-
-str ** sca_db_subscriptions_columns (void)
-
-{
-static str *subs_columns [] = {
-  (str *)&SCA_DB_SUBSCRIBER_COL_NAME,
-  (str *)&SCA_DB_AOR_COL_NAME,
-  (str *)&SCA_DB_EVENT_COL_NAME,
-  (str *)&SCA_DB_EXPIRES_COL_NAME,
-  (str *)&SCA_DB_STATE_COL_NAME,
-  (str *)&SCA_DB_APP_IDX_COL_NAME,
-  (str *)&SCA_DB_CALL_ID_COL_NAME,
-  (str *)&SCA_DB_FROM_TAG_COL_NAME,
-  (str *)&SCA_DB_TO_TAG_COL_NAME,
-  (str *)&SCA_DB_RECORD_ROUTE_COL_NAME,
-  (str *)&SCA_DB_NOTIFY_CSEQ_COL_NAME,
-  (str *)&SCA_DB_SUBSCRIBE_CSEQ_COL_NAME,
-  NULL
-  };
-return (subs_columns);
-}
-
-db1_con_t *sca_db_get_connection (void)
-
-{
-assert (sca && sca->cfg->db_url);
-assert (sca->db_api && sca->db_api->init);
-if (!sca_db_con)
-  {
-  sca_db_con = pmod_data->db_api->init (sca->cfg->db_url);
-/* catch connection error in caller */
-  }
-return (sca_db_con);
-}
-
-void msgq_db_disconnect (void)
-
-{
-if (sca_db_con)
-  {
-  pmod_data->db_api->close (sca_db_con);
-  sca_db_con = NULL;
-  }
-}
-#endif  /* ??? */
