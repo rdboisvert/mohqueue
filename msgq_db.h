@@ -40,91 +40,24 @@
 #define MSGQCOL_MFILE 3
 
 /* msgqcalls columns */
-#define CALL_COLCNT   5
+#define CALL_COLCNT   6
 #define CALLCOL_MSGQ  0
 #define CALLCOL_FROM  1
 #define CALLCOL_CALL  2
 #define CALLCOL_TAG   3
 #define CALLCOL_STATE 4
+#define CALLCOL_TIME  5
 
 /**********
 * DB function declarations
 **********/
 
 void add_call_rec (db1_con_t *, int);
-void delete_call_rec (db1_con_t *, int);
+void delete_call_rec (db1_con_t *, call_lst *);
 db1_con_t *msgq_dbconnect (void);
 void msgq_dbdisconnect (db1_con_t *);
-void update_call_rec (db1_con_t *, int);
+void update_call_rec (db1_con_t *, call_lst *);
 void update_msgq_lst (db1_con_t *pconn);
-
-#if 0  /* ??? */
-#define SCA_DB_SUBSCRIPTIONS_NUM_COLUMNS    12
-
-enum {
-  SCA_DB_SUBS_SUBSCRIBER_COL = 0,
-  SCA_DB_SUBS_AOR_COL = 1,
-  SCA_DB_SUBS_EVENT_COL,
-  SCA_DB_SUBS_EXPIRES_COL,
-  SCA_DB_SUBS_STATE_COL,
-  SCA_DB_SUBS_APP_IDX_COL,
-  SCA_DB_SUBS_CALL_ID_COL,
-  SCA_DB_SUBS_FROM_TAG_COL,
-  SCA_DB_SUBS_TO_TAG_COL,
-  SCA_DB_SUBS_RECORD_ROUTE_COL,
-  SCA_DB_SUBS_NOTIFY_CSEQ_COL,
-  SCA_DB_SUBS_SUBSCRIBE_CSEQ_COL,
-  SCA_DB_SUBS_BOUNDARY,
-  };
-
-enum {
-  SCA_DB_FLAG_NONE = 0,
-  SCA_DB_FLAG_INSERT = 1,
-  SCA_DB_FLAG_UPDATE,
-  SCA_DB_FLAG_DELETE,
-  };
-
-#define SCA_DB_BIND_STR_VALUE (cv, ct, k, v, c) \
-	((db_key_t *)(k))[ (c) ] = (str *)(ct); \
-	((db_val_t *)(v))[ (c) ].type = DB1_STR; \
-	((db_val_t *)(v))[ (c) ].nul = 0; \
-	((db_val_t *)(v))[ (c) ].val.str_val = (str)(cv); \
-	(c)++;
-
-#define SCA_DB_BIND_INT_VALUE (cv, ct, k, v, c) \
-	((db_key_t *)(k))[ (c) ] = (str *)(ct); \
-	((db_val_t *)(v))[ (c) ].type = DB1_INT; \
-	((db_val_t *)(v))[ (c) ].nul = 0; \
-	((db_val_t *)(v))[ (c) ].val.int_val = (int)(cv); \
-	(c)++;
-
-/**********
-* global constants declarations
-**********/
-
-extern const str SCA_DB_SUBSCRIBER_COL_NAME;
-extern const str SCA_DB_AOR_COL_NAME;
-extern const str SCA_DB_EVENT_COL_NAME;
-extern const str SCA_DB_EXPIRES_COL_NAME;
-extern const str SCA_DB_STATE_COL_NAME;
-extern const str SCA_DB_APP_IDX_COL_NAME;
-extern const str SCA_DB_CALL_ID_COL_NAME;
-extern const str SCA_DB_FROM_TAG_COL_NAME;
-extern const str SCA_DB_TO_TAG_COL_NAME;
-extern const str SCA_DB_RECORD_ROUTE_COL_NAME;
-extern const str SCA_DB_NOTIFY_CSEQ_COL_NAME;
-extern const str SCA_DB_SUBSCRIBE_CSEQ_COL_NAME;
-
-/**********
-* global function declarations
-**********/
-
-str **sca_db_subscriptions_columns (void);
-void sca_db_subscriptions_get_value_for_column (int, db_val_t *, void *);
-void sca_db_subscriptions_set_value_for_column (int, db_val_t *, void *);
-void sca_db_subscriptions_bind_value_for_column (int, db_val_t *, void *);
-db1_con_t *sca_db_get_connection (void);
-void msgq_db_disconnect (void);
-#endif  /* ??? */
+void wait_db_flush (db1_con_t *, call_lst *);
 
 #endif /* MSGQ_DB_H */

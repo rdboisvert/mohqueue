@@ -51,11 +51,15 @@ typedef struct
 #define CLSTA_PRING     0x01
 #define CLSTA_PRINGACK  0x02
 #define CLSTA_RING      0x03
-#define CLSTA_INQUEUE   0x04
+#define CLSTA_INVITED   0x04
+#define CLSTA_ACKED     0x05
+#define CLSTA_INQUEUE   0x06
+#define CLSTA_ENDCALL   0x07
 #define CLSTA_ERR       0xFF
 
 typedef struct
   {
+  int call_dirty;
   int call_active;
   char call_id [101];
   char call_from [URI_LEN + 1];
@@ -82,8 +86,10 @@ typedef struct
   call_lst *pcall_lst;
   db_func_t pdb [1];
   tm_api_t ptm [1];
+  sl_api_t psl [1];
   rr_api_t prr [1];
   cmd_function fn_rtp_answer;
+  cmd_function fn_rtp_destroy;
   cmd_function fn_rtp_offer;
   cmd_function fn_rtp_stream2uac;
   } mod_data;

@@ -306,10 +306,15 @@ if (!init_db ())
   { goto initerr; }
 
 /**********
-* o bind to TM/RR modules
+* o bind to SL/TM/RR modules
 * o bind to RTPPROXY functions
 **********/
 
+if (sl_load_api (pmod_data->psl))
+  {
+  LM_ERR ("Unable to load SL module");
+  goto initerr;
+  }
 if (load_tm_api (pmod_data->ptm))
   {
   LM_ERR ("Unable to load TM module");
@@ -336,6 +341,12 @@ pmod_data->fn_rtp_stream2uac = find_export ("rtpproxy_stream2uac", 2, 0);
 if (!pmod_data->fn_rtp_stream2uac)
   {
   LM_ERR ("Unable to load rtpproxy_stream2uac");
+  goto initerr;
+  }
+pmod_data->fn_rtp_destroy = find_export ("rtpproxy_destroy", 0, 0);
+if (!pmod_data->fn_rtp_destroy)
+  {
+  LM_ERR ("Unable to load rtpproxy_destroy");
   goto initerr;
   }
 LM_INFO ("module initialized");

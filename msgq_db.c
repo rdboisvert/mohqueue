@@ -52,6 +52,7 @@ str CALLCSTR_FROM = STR_STATIC_INIT ("call_from");
 str CALLCSTR_CALL = STR_STATIC_INIT ("call_id");
 str CALLCSTR_TAG = STR_STATIC_INIT ("call_tag");
 str CALLCSTR_STATE = STR_STATIC_INIT ("call_state");
+str CALLCSTR_TIME = STR_STATIC_INIT ("msgq_time");
 
 static str *call_columns [] =
   {
@@ -60,6 +61,7 @@ static str *call_columns [] =
   &CALLCSTR_CALL,
   &CALLCSTR_TAG,
   &CALLCSTR_STATE,
+  &CALLCSTR_TIME,
   NULL
   };
 
@@ -90,6 +92,7 @@ set_call_key (prkeys, CALLCOL_FROM, CALLCOL_FROM);
 set_call_key (prkeys, CALLCOL_CALL, CALLCOL_CALL);
 set_call_key (prkeys, CALLCOL_TAG, CALLCOL_TAG);
 set_call_key (prkeys, CALLCOL_STATE, CALLCOL_STATE);
+set_call_key (prkeys, CALLCOL_TIME, CALLCOL_TIME);
 return;
 }
 
@@ -110,6 +113,7 @@ set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
 set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
 set_call_val (prvals, CALLCOL_TAG, CALLCOL_TAG, pcall->call_tag);
 set_call_val (prvals, CALLCOL_STATE, CALLCOL_STATE, &pcall->call_state);
+set_call_val (prvals, CALLCOL_TIME, CALLCOL_TIME, 0);
 return;
 }
 
@@ -163,6 +167,11 @@ switch (ncolid)
     prvals [ncol].type = DB1_STRING;
     prvals [ncol].nul = 0;
     break;
+  case CALLCOL_TIME:
+    time (&prvals [ncol].val.time_val);
+    prvals [ncol].type = DB1_DATETIME;
+    prvals [ncol].nul = 0;
+    break;
   }
 return;
 }
@@ -180,7 +189,7 @@ return;
 * OUTPUT: none
 **********/
 
-void add_call_rec (db1_con_t *pconn, int ncidx)
+void add_call_rec (db1_con_t *pconn, int ncall_idx)
 
 {
 /**********
@@ -196,12 +205,14 @@ pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
 db_key_t prkeys [CALL_COLCNT];
 fill_call_keys (prkeys);
 db_val_t prvals [CALL_COLCNT];
-fill_call_vals (prvals, &pmod_data->pcall_lst [ncidx]);
-if (pdb->insert (pconn, prkeys, prvals, MSGQ_COLCNT) < 0)
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+fill_call_vals (prvals, pcall);
+if (pdb->insert (pconn, prkeys, prvals, CALL_COLCNT) < 0)
   {
   LM_WARN ("%sUnable to add new row to %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
+pcall->call_dirty = 0;
 return;
 }
 
@@ -210,11 +221,11 @@ return;
 *
 * INPUT:
 *   Arg (1) = connection pointer
-*   Arg (2) = call index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void delete_call_rec (db1_con_t *pconn, int ncidx)
+void delete_call_rec (db1_con_t *pconn, call_lst *pcall)
 
 {
 /**********
@@ -230,12 +241,13 @@ pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
 db_key_t prkeys [1];
 set_call_key (prkeys, 0, CALLCOL_CALL);
 db_val_t prvals [1];
-set_call_val (prvals, 0, CALLCOL_CALL, pmod_data->pcall_lst [ncidx].call_id);
-if (pdb->delete (pconn, prkeys, NULL, prvals, 0) < 0)
+set_call_val (prvals, 0, CALLCOL_CALL, pcall->call_id);
+if (pdb->delete (pconn, prkeys, 0, prvals, 1) < 0)
   {
   LM_WARN ("%sUnable to delete row from %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
+pcall->call_dirty = 0;
 return;
 }
 
@@ -276,11 +288,11 @@ return;
 *
 * INPUT:
 *   Arg (1) = connection pointer
-*   Arg (2) = call index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void update_call_rec (db1_con_t *pconn, int ncidx)
+void update_call_rec (db1_con_t *pconn, call_lst *pcall)
 
 {
 /**********
@@ -292,7 +304,6 @@ char *pfncname = "update_call_rec: ";
 if (!pconn)
   { return; }
 db_func_t *pdb = pmod_data->pdb;
-call_lst *pcall = &pmod_data->pcall_lst [ncidx];
 pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
 db_key_t pqkeys [1];
 set_call_key (pqkeys, 0, CALLCOL_CALL);
@@ -302,11 +313,12 @@ db_key_t pukeys [CALL_COLCNT];
 fill_call_keys (pukeys);
 db_val_t puvals [CALL_COLCNT];
 fill_call_vals (puvals, pcall);
-if (pdb->update (pconn, pqkeys, NULL, pqvals, pukeys, puvals, 1, CALL_COLCNT) < 0)
+if (pdb->update (pconn, pqkeys, 0, pqvals, pukeys, puvals, 1, CALL_COLCNT) < 0)
   {
   LM_WARN ("%sUnable to update row in %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
+pcall->call_dirty = 0;
 return;
 }
 
@@ -338,7 +350,7 @@ db_key_t prkeys [MSGQ_COLCNT];
 for (nidx = 0; nidx < MSGQ_COLCNT; nidx++)
   { prkeys [nidx] = msgq_columns [nidx]; }
 db1_res_t *presult = NULL;
-if (pdb->query (pconn, NULL, NULL, NULL, prkeys, 0, MSGQ_COLCNT, 0, &presult))
+if (pdb->query (pconn, 0, 0, 0, prkeys, 0, MSGQ_COLCNT, 0, &presult))
   {
   LM_ERR ("update_msgq_lst: table query (%s) failed",
     pmod_data->pcfg->db_qtable.s);
@@ -454,5 +466,31 @@ for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)
   --pmod_data->msgq_cnt;
   --nidx;
   }
+return;
+}
+
+/**********
+* Wait Until DB Flushed
+*
+* INPUT:
+*   Arg (1) = connection pointer
+*   Arg (2) = call structure pointer
+* OUTPUT: none
+**********/
+
+void wait_db_flush (db1_con_t *pconn, call_lst *pcall)
+
+{
+/**********
+* o make sure data flushed to DB
+* o set dirty flag
+**********/
+
+if (pconn)
+  {
+  while (pcall->call_dirty)
+    { usleep (200); }
+  }
+pcall->call_dirty = 1;
 return;
 }
