@@ -28,10 +28,8 @@
 * module function declarations
 **********/
 
-int msgq_count (sip_msg_t *, char *, char *);
-int msgq_count_fixup (void **, int);
-int msgq_process (sip_msg_t *, char *, char *);
-int msgq_redirect (sip_msg_t *, char *, char *);
-int msgq_redirect_fixup (void **, int);
+int msgq_count (sip_msg_t *, pv_elem_t *, pv_elem_t *);
+int msgq_process (sip_msg_t *);
+int msgq_redirect (sip_msg_t *, pv_elem_t *, pv_elem_t *);
 
 #endif /* MSGQ_FUNCS_H */

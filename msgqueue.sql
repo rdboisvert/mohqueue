@@ -15,6 +15,7 @@ CREATE TABLE msgqcalls (
     call_state INTEGER NOT NULL,
     call_id VARCHAR(100) NOT NULL,
     call_from VARCHAR(100) NOT NULL,
+    call_via VARCHAR(1024) NOT NULL,
     call_tag VARCHAR(100) NOT NULL,
     msgq_time date NOT NULL,
     CONSTRAINT msgqcalls_idx UNIQUE (call_id)

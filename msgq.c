@@ -39,6 +39,7 @@ MODULE_VERSION
 static int mod_child_init (int);
 static void mod_destroy (void);
 static int mod_init (void);
+int str_fixup (void **, int);
 
 /**********
 * global varbs
@@ -52,10 +53,10 @@ mod_data *pmod_data;
 
 /* EXPORTED COMMANDS */
 static cmd_export_t mod_cmds [] = {
-  { "msgq_count", (cmd_function) msgq_count, 1, msgq_count_fixup, 0,
+  { "msgq_count", (cmd_function) msgq_count, 2, str_fixup, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
   { "msgq_process", (cmd_function) msgq_process, 0, NULL, 0, REQUEST_ROUTE },
-  { "msgq_redirect", (cmd_function) msgq_redirect, 2, msgq_redirect_fixup, 0,
+  { "msgq_redirect", (cmd_function) msgq_redirect, 2, str_fixup, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
   { NULL, NULL, -1, 0, 0 },
 };
@@ -363,4 +364,30 @@ if (pmod_data->msgq_cnt)
 shm_free (pmod_data);
 pmod_data = NULL;
 return -1;
+}
+
+/**********
+* String Fixup
+*
+* INPUT:
+*   Arg (1) = parameter array pointer
+*   Arg (1) = parameter number
+* OUTPUT: -1 if failed; 0 if saved as pv_elem_t
+**********/
+
+int str_fixup (void **param, int param_no)
+
+{
+pv_elem_t *ppv = NULL;
+str pstr [1];
+
+pstr->s = (char *)(*param);
+pstr->len = strlen (pstr->s);
+if (pv_parse_format (pstr, &ppv) < 0)
+  {
+  LM_ERR ("Invalid string format (%s)", pstr->s);
+  return E_UNSPEC;
+  }
+*param = (void*)ppv;
+return 0;
 }

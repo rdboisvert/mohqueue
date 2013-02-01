@@ -33,6 +33,7 @@ str MSGQCSTR_ID = STR_STATIC_INIT ("id");
 str MSGQCSTR_URI = STR_STATIC_INIT ("msgq_uri");
 str MSGQCSTR_MDIR = STR_STATIC_INIT ("msgq_mohdir");
 str MSGQCSTR_MFILE = STR_STATIC_INIT ("msgq_mohfile");
+str MSGQCSTR_NAME = STR_STATIC_INIT ("msgq_name");
 
 static str *msgq_columns [] =
   {
@@ -40,6 +41,7 @@ static str *msgq_columns [] =
   &MSGQCSTR_URI,
   &MSGQCSTR_MDIR,
   &MSGQCSTR_MFILE,
+  &MSGQCSTR_NAME,
   NULL
   };
 
@@ -47,18 +49,20 @@ static str *msgq_columns [] =
 * msgqcalls definitions
 **********/
 
-str CALLCSTR_MSGQ = STR_STATIC_INIT ("msgq_id");
-str CALLCSTR_FROM = STR_STATIC_INIT ("call_from");
 str CALLCSTR_CALL = STR_STATIC_INIT ("call_id");
-str CALLCSTR_TAG = STR_STATIC_INIT ("call_tag");
+str CALLCSTR_FROM = STR_STATIC_INIT ("call_from");
+str CALLCSTR_MSGQ = STR_STATIC_INIT ("msgq_id");
 str CALLCSTR_STATE = STR_STATIC_INIT ("call_state");
+str CALLCSTR_TAG = STR_STATIC_INIT ("call_tag");
 str CALLCSTR_TIME = STR_STATIC_INIT ("msgq_time");
+str CALLCSTR_VIA = STR_STATIC_INIT ("call_via");
 
 static str *call_columns [] =
   {
   &CALLCSTR_MSGQ,
   &CALLCSTR_FROM,
   &CALLCSTR_CALL,
+  &CALLCSTR_VIA,
   &CALLCSTR_TAG,
   &CALLCSTR_STATE,
   &CALLCSTR_TIME,
@@ -87,12 +91,9 @@ void set_call_val (db_val_t *, int, int, void *);
 void fill_call_keys (db_key_t *prkeys)
 
 {
-set_call_key (prkeys, CALLCOL_MSGQ, CALLCOL_MSGQ);
-set_call_key (prkeys, CALLCOL_FROM, CALLCOL_FROM);
-set_call_key (prkeys, CALLCOL_CALL, CALLCOL_CALL);
-set_call_key (prkeys, CALLCOL_TAG, CALLCOL_TAG);
-set_call_key (prkeys, CALLCOL_STATE, CALLCOL_STATE);
-set_call_key (prkeys, CALLCOL_TIME, CALLCOL_TIME);
+int nidx;
+for (nidx = 0; nidx < CALL_COLCNT; nidx++)
+  { set_call_key (prkeys, nidx, nidx); }
 return;
 }
 
@@ -111,6 +112,7 @@ void fill_call_vals (db_val_t *prvals, call_lst *pcall)
 set_call_val (prvals, CALLCOL_MSGQ, CALLCOL_MSGQ, &pcall->msgq_id);
 set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
 set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
+set_call_val (prvals, CALLCOL_VIA, CALLCOL_VIA, pcall->call_via);
 set_call_val (prvals, CALLCOL_TAG, CALLCOL_TAG, pcall->call_tag);
 set_call_val (prvals, CALLCOL_STATE, CALLCOL_STATE, &pcall->call_state);
 set_call_val (prvals, CALLCOL_TIME, CALLCOL_TIME, 0);
@@ -163,6 +165,7 @@ switch (ncolid)
   case CALLCOL_CALL:
   case CALLCOL_FROM:
   case CALLCOL_TAG:
+  case CALLCOL_VIA:
     prvals [ncol].val.string_val = (char *)pdata;
     prvals [ncol].type = DB1_STRING;
     prvals [ncol].nul = 0;
@@ -392,6 +395,12 @@ for (nidx = 0; nidx < nrows; nidx++)
         strcpy (pqlst [nidx2].msgq_mohfile, ptext);
         LM_INFO ("Changed mohfile for queue (%s)", puri);
         }
+      ptext = VAL_STRING (prowvals + MSGQCOL_NAME);
+      if (strcmp (pqlst [nidx2].msgq_name, ptext))
+        {
+        strcpy (pqlst [nidx2].msgq_name, ptext);
+        LM_INFO ("Changed name for queue (%s)", puri);
+        }
       bfnd = -1;
       pqlst [nidx2].msgq_flag |= MSGQF_CHK;
       break;
@@ -429,6 +438,8 @@ for (nidx = 0; nidx < nrows; nidx++)
       VAL_STRING (prowvals + MSGQCOL_MDIR));
     strcpy (pnewlst [nsize].msgq_mohfile,
       VAL_STRING (prowvals + MSGQCOL_MFILE));
+    strcpy (pnewlst [nsize].msgq_name,
+      VAL_STRING (prowvals + MSGQCOL_NAME));
     LM_INFO ("Adding new queue (%s)", pnewlst [nsize].msgq_uri);
     if (nsize)
       { shm_free (pmod_data->pmsgq_lst); }

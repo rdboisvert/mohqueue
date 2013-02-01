@@ -40,6 +40,7 @@
 
 typedef struct
   {
+  char msgq_name [26];
   char msgq_uri [URI_LEN + 1];
   char msgq_mohdir [101];
   char msgq_mohfile [101];
@@ -64,6 +65,7 @@ typedef struct
   char call_id [101];
   char call_from [URI_LEN + 1];
   char call_tag [101];
+  char call_via [1024];
   int call_state;
   int call_rseq;
   int msgq_id;

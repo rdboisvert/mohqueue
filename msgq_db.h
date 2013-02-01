@@ -33,20 +33,22 @@
 #define MSGQ_QTABLE_VERSION  1
 
 /* msgqueues columns */
-#define MSGQ_COLCNT   4
+#define MSGQ_COLCNT   5
 #define MSGQCOL_ID    0
 #define MSGQCOL_URI   1
 #define MSGQCOL_MDIR  2
 #define MSGQCOL_MFILE 3
+#define MSGQCOL_NAME  4
 
 /* msgqcalls columns */
-#define CALL_COLCNT   6
+#define CALL_COLCNT   7
 #define CALLCOL_MSGQ  0
 #define CALLCOL_FROM  1
 #define CALLCOL_CALL  2
-#define CALLCOL_TAG   3
-#define CALLCOL_STATE 4
-#define CALLCOL_TIME  5
+#define CALLCOL_VIA   3
+#define CALLCOL_TAG   4
+#define CALLCOL_STATE 5
+#define CALLCOL_TIME  6
 
 /**********
 * DB function declarations

@@ -44,7 +44,7 @@ str MTHD_INVITE = STR_STATIC_INIT ("INVITE");
 str MTHD_PRACK = STR_STATIC_INIT ("PRACK");
 
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
-
+str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 
@@ -205,17 +205,16 @@ return;
 }
 
 /**********
-* Create New Call from CallID
+* Create New Call Record
 *
 * INPUT:
-*   Arg (1) = call ID str pointer
-*   Arg (2) = from str pointer
-*   Arg (3) = totag str pointer
-*   Arg (4) = queue index
+*   Arg (1) = SIP message pointer
+*   Arg (2) = totag str pointer
+*   Arg (3) = queue index
 * OUTPUT: call index; -1 if unable to create
 **********/
 
-int create_call (str *pcallid, str *pfrom, str *ptotag, int msgq_idx)
+int create_call (sip_msg_t *pmsg, str *ptotag, int msgq_idx)
 
 {
 /**********
@@ -224,20 +223,20 @@ int create_call (str *pcallid, str *pfrom, str *ptotag, int msgq_idx)
 **********/
 
 char *pfncname = "create_call: ";
-int nidx = pmod_data->call_cnt;
-for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+int ncall_idx = pmod_data->call_cnt;
+for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   {
-  if (!pmod_data->pcall_lst [nidx].call_active)
+  if (!pmod_data->pcall_lst [ncall_idx].call_active)
     { break; }
   }
-if (nidx == pmod_data->call_cnt)
+if (ncall_idx == pmod_data->call_cnt)
   {
   if (!pmod_data->pcall_lst)
     { pmod_data->pcall_lst = shm_malloc (sizeof (call_lst)); }
   else
     {
     pmod_data->pcall_lst = shm_realloc (pmod_data->pcall_lst,
-      sizeof (call_lst) * (nidx + 1));
+      sizeof (call_lst) * (ncall_idx + 1));
     }
   if (!pmod_data->pcall_lst)
     {
@@ -245,30 +244,83 @@ if (nidx == pmod_data->call_cnt)
     pmod_data->call_cnt = 0;
     return -1;
     }
-  nidx = pmod_data->call_cnt++;
+  ncall_idx = pmod_data->call_cnt++;
   }
 
 /**********
-* add new entry to list
+* add values to new entry
 **********/
 
-call_lst *pclst = pmod_data->pcall_lst;
-pclst [nidx].call_active = 1;
-pclst [nidx].msgq_id = msgq_idx;
-pclst [nidx].call_state = 0;
-strncpy (pclst [nidx].call_id, pcallid->s, pcallid->len);
-pclst [nidx].call_id [pcallid->len] = '\0';
-strncpy (pclst [nidx].call_from, pfrom->s, pfrom->len);
-pclst [nidx].call_from [pfrom->len] = '\0';
-strncpy (pclst [nidx].call_tag, ptotag->s, ptotag->len);
-pclst [nidx].call_tag [ptotag->len] = '\0';
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+pcall->call_active = 1;
+pcall->msgq_id = pmod_data->pmsgq_lst [msgq_idx].msgq_id;
+pcall->call_state = 0;
+str *pstr = &pmsg->callid->body;
+strncpy (pcall->call_id, pstr->s, pstr->len);
+pcall->call_id [pstr->len] = '\0';
+pstr = &pmsg->from->body;
+strncpy (pcall->call_from, pstr->s, pstr->len);
+pcall->call_from [pstr->len] = '\0';
+strncpy (pcall->call_tag, ptotag->s, ptotag->len);
+pcall->call_tag [ptotag->len] = '\0';
+
+/**********
+* extract Via
+**********/
+
+hdr_field_t *phdr;
+struct via_body *pvia;
+int npos1 = 0;
+int npos2;
+char *pviabuf;
+int nvia_max = sizeof (pcall->call_via);
+int bovrflow = 0;
+for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
+  {
+  for (pvia = (struct via_body *)phdr->parsed; pvia; pvia = pvia->next)
+    {
+    /**********
+    * o skip trailing whitespace
+    * o check if overflow
+    **********/
+
+    npos2 = pvia->bsize;
+    pviabuf = pvia->name.s;
+    while (npos2)
+      {
+      --npos2;
+      if (pviabuf [npos2] == ' ' || pviabuf [npos2] == '\r'
+        || pviabuf [npos2] == '\n' || pviabuf [npos2] == '\t' || pviabuf [npos2] == ',')
+        { continue; }
+      break;
+      }
+    if (npos2 + npos1 >= nvia_max)
+      {
+      LM_WARN ("%sVia buffer overflowed!", pfncname);
+      bovrflow = 1;
+      break;
+      }
+
+    /**********
+    * copy via
+    **********/
+
+    if (npos1)
+      { pcall->call_via [npos1++] = ','; }
+    strncpy (&pcall->call_via [npos1], pviabuf, npos2);
+    npos1 += npos2;
+    pcall->call_via [npos1] = '\0';
+    }
+  if (bovrflow)
+    { break; }
+  }
 
 /**********
 * update DB
 **********/
 
-add_call_rec (pconn, nidx);
-return nidx;
+add_call_rec (pconn, ncall_idx);
+return ncall_idx;
 }
 
 /**********
@@ -354,6 +406,29 @@ return -1;
 }
 
 /**********
+* Find Queue
+*
+* INPUT:
+*   Arg (1) = queue name str pointer
+* OUTPUT: queue index; -1 if unable to find
+**********/
+
+int find_queue (str *pqname)
+
+{
+int nidx;
+str tmpstr;
+for (nidx = 0; nidx < pmod_data->msgq_cnt; nidx++)
+  {
+  tmpstr.s = pmod_data->pmsgq_lst [nidx].msgq_name;
+  tmpstr.len = strlen (tmpstr.s);
+  if (STR_EQ (tmpstr, *pqname))
+    { return nidx; }
+  }
+return -1;
+}
+
+/**********
 * Process First INVITE Message
 *
 * INPUT:
@@ -382,6 +457,7 @@ if (ncall_idx != -1)
 /**********
 * o create new transaction
 * o SDP exists?
+* o accepts REFER?
 * o send rtpproxy offer
 **********/
 
@@ -399,6 +475,13 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
       { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
     return;
     }
+  }
+if (!search_hdr_ext (pmsg->allow, prefer))
+  {
+  LM_ERR ("%sINVITE lacks ability to use REFER", pfncname);
+  if (ptm->t_reply (pmsg, 603, "INVITE lacks REFER") < 0)
+    { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
+  return;
   }
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   {
@@ -418,7 +501,7 @@ if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
   LM_ERR ("%sUnable to create totag", pfncname);
   return;
   }
-ncall_idx = create_call (&pmsg->callid->body, &pmsg->from->body, ptotag, msgq_idx);
+ncall_idx = create_call (pmsg, ptotag, msgq_idx);
 if (ncall_idx == -1)
   { return; }
 
@@ -581,49 +664,73 @@ return;
 **********/
 
 /**********
-* fixup functions
+* Count Messages
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue name
+*   Arg (3) = pv result name
+* OUTPUT: -1 if no items in queue; else result = count
 **********/
 
-/**********
-* count messages
-**********/
-
-int msgq_count_fixup (void **param, int param_no)
+int msgq_count (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *presult)
 
 {
-/*
-LM_INFO ("???msgq_count_fixup ()");
-*/
-return 1;
-}
-
 /**********
-* redirect messages
+* get queue and pv names
 **********/
 
-int msgq_redirect_fixup (void **param, int param_no)
-
-{
-/*
-LM_INFO ("???msgq_redirect_fixup ()");
-*/
-return 1;
-}
+char *pfncname = "msgq_count: ";
+str pavp [1], pqname [1];
+if (!pqueue || !presult)
+  {
+  LM_ERR ("%sParameters missing!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pqueue, pqname))
+  {
+  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, presult, pavp))
+  {
+  LM_ERR ("%sUnable to extract pv name!", pfncname);
+  return -1;
+  }
 
 /**********
-* module functions
+* o find queue
+* o count items in queue
 **********/
+
+int nq_idx = find_queue (pqname);
+int ncount = 0;
+call_lst *pcalls = pmod_data->pcall_lst;
+int ncall_idx, msgq_id;
+if (nq_idx != -1)
+  {
+  msgq_id = pmod_data->pmsgq_lst [nq_idx].msgq_id;
+  for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
+    {
+    if (!pcalls [ncall_idx].call_active)
+      { continue; }
+    if (pcalls [ncall_idx].msgq_id == msgq_id
+      && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
+      { ncount++; }
+    }
+  }
 
 /**********
-* count messages
+* o set pv result
+* o exit with result
 **********/
 
-int msgq_count (sip_msg_t *msg, char *p1, char *p2)
-
-{
-/*
-LM_INFO ("???msgq_count ()");
-*/
+sr_xval_t ppv_val [1];
+ppv_val->type = SR_XTYPE_INT;
+ppv_val->v.i = ncount;
+xavp_set_value (pavp, 0, ppv_val, NULL);
+if (!ncount)
+  { return -1; }
 return 1;
 }
 
@@ -632,12 +739,10 @@ return 1;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = ignore
-*   Arg (3) = ignore
 * OUTPUT: -1=not directed to queue; 0=exit script
 **********/
 
-int msgq_process (sip_msg_t *pmsg, char *p1, char *p2)
+int msgq_process (sip_msg_t *pmsg)
 
 {
 /**********
@@ -703,12 +808,67 @@ return 0;
 * redirect message
 **********/
 
-int msgq_redirect (sip_msg_t *msg, char *p1, char *p2)
+/**********
+* Redirect Oldest Queued Call
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue name
+*   Arg (3) = redirect URI
+* OUTPUT: -1 if no items in queue; else redirects oldest call
+**********/
+
+int msgq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
 
 {
-/*
-LM_INFO ("???msgq_redirect ()");
-*/
+/**********
+* o get queue name and URI
+* o check URI
+**********/
+
+char *pfncname = "msgq_redirect: ";
+str puri [1], pqname [1];
+if (!pqueue || !pURI)
+  {
+  LM_ERR ("%sParameters missing!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pqueue, pqname))
+  {
+  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pURI, puri))
+  {
+  LM_ERR ("%sUnable to extract URI!", pfncname);
+  return -1;
+  }
+struct sip_uri puri_parsed [1];
+if (parse_uri (puri->s, puri->len, puri_parsed))
+  {
+  LM_ERR ("%sInvalid URI (%.*s)!", pfncname, STR_FMT (puri));
+  return -1;
+  }
+
+/**********
+* o form REFER msg
+**********/
+
+char prefermsg [] =
+  {
+  "REFER {INQUEUE_URI} SIP/2.0" SIPEOL
+  "CSeq: 1 REFER" SIPEOL
+  "From: {QUEUE_URIw/tag}" SIPEOL
+  "To: {INQUEUE_URIw/tag}" SIPEOL
+  "Call-ID: {CALLID}" SIPEOL
+  "Max-Forwards: 70" SIPEOL
+  "Route: <sip:10.211.64.5;lr=on;ftag=ed156918>" SIPEOL
+  "Via: SIP/2.0/UDP 192.168.1.6:5060;branch=z9hG4bK-3134-0f2e757e56b07d931efa9a7b64ab5d96" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  "Refer-To: {TO_URI}" SIPEOL
+  "Referred-By: {INQUEUE_URI}" SIPEOL
+  "Content-Length: 0" SIPEOL
+  };
 return 1;
 }
 
