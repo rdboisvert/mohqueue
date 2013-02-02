@@ -7,7 +7,7 @@
 
 include ../../Makefile.defs
 auto_gen=
-NAME=msgqueue.so
+NAME=mohqueue.so
 LIBS=
 
 DEFS+=-DKAMAILIO_MOD_INTERFACE
