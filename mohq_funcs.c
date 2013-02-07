@@ -1025,22 +1025,43 @@ sprintf (pbuf, prefermsg,
   STR_FMT (pruri)); // Referred-By
 
 /**********
+* create dialog
+**********/
+
+dlg_t *pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
+if (!pdlg)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  goto refererr;
+  }
+memset (pdlg, 0, sizeof (dlg_t));
+pdlg->loc_seq.value = 1; //??? need CSeq?
+pdlg->loc_seq.is_set = 1;
+pdlg->id.call_id.s = pcall->call_id;
+pdlg->id.call_id.len = strlen (pcall->call_id);
+pdlg->id.loc_tag.s = pcall->call_tag;
+pdlg->id.loc_tag.len = strlen (pcall->call_tag);
+// pdlg->id.rem_tag.s = 0;
+// pdlg->id.rem_tag.len = 0;
+pdlg->rem_target.s = pruri->s;
+pdlg->rem_target.len = pruri->len;
+pdlg->loc_uri.s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
+pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
+pdlg->rem_uri.s = pruri->s;
+pdlg->rem_uri.len = pruri->len;
+pdlg->state = DLG_CONFIRMED;
+
+/**********
 * send request
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
-str pfrom [1], phdrs [1], pto [1];
 uac_req_t puac [1];
-memset (puac, 0, sizeof (uac_req_t));
-puac->method = prefer;
+str phdrs [1];
 phdrs->s = pbuf;
 phdrs->len = strlen (pbuf);
-puac->headers = phdrs;
-pto->s = pcall->call_from;
-pto->len = strlen (pcall->call_from);
-pfrom->s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
-pfrom->len = strlen (pmod_data->pmohq_lst [nq_idx].mohq_uri);
-if (ptm->t_request (puac, pruri, pto, pfrom, 0) < 0)
+set_uac_req (puac, prefer, phdrs, 0, pdlg, 0, 0, 0);
+if (ptm->t_request_within (puac))
   {
   LM_ERR ("%sUnable to create REFER request!", pfncname);
   goto refererr;
