@@ -1,0 +1,16 @@
+Check URI of MOH queues before accepting.
+
+Use URI comparison routine when checking if URI matches.
+
+Use a locking mechanism to prevent overlap problems when dealing with
+messages.
+
+Why does RTPPROXY create rejected packets and yet still works.
+
+Keep track of call counts in queue records.
+
+Find out why URI wrong when build SIP msg from buffer.
+
+Need to use free_sip_msg ()?
+
+Accept-Language should be what is sent in INVITE
