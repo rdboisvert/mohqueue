@@ -70,6 +70,7 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
+void refer_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, str *, call_lst *);
 int send_rtp_answer (sip_msg_t *, str *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
@@ -224,13 +225,13 @@ return;
 * Create New Call Record
 *
 * INPUT:
-*   Arg (1) = SIP message pointer
-*   Arg (2) = totag str pointer
-*   Arg (3) = queue index
+*   Arg (1) = queue index
+*   Arg (2) = SIP message pointer
+*   Arg (3) = totag str pointer
 * OUTPUT: call index; -1 if unable to create
 **********/
 
-int create_call (sip_msg_t *pmsg, str *ptotag, int mohq_idx)
+int create_call (int mohq_idx, sip_msg_t *pmsg, str *ptotag)
 
 {
 /**********
@@ -359,69 +360,6 @@ wait_db_flush (pconn, pcall);
 delete_call_rec (pconn, pcall);
 pcall->call_active = 0;
 return;
-}
-
-/**********
-* Extract URI from display name and tags
-*
-* INPUT:
-*   Arg (1) = full URI pointer
-*   Arg (1) = full URI length
-*   Arg (2) = empty str pointer; s and len elements rewritten
-* OUTPUT: 0=successfully extracted; <>0=failed
-* NOTE: assumes valid URI portion
-**********/
-
-int extract_uri (char *pfull, int nlen, str *puri)
-
-{
-/**********
-* search for <uri>
-**********/
-
-int nfnd = 0;
-int npos;
-for (npos = 0; npos < nlen; npos++)
-  {
-  if (!nfnd)
-    {
-    /**********
-    * o found begin?
-    * o more chars?
-    * o save position
-    **********/
-
-    if (pfull [npos] != '<')
-      { continue; }
-    if (++npos == nlen)
-      { return -1; }
-    puri->s = &pfull [npos];
-    nfnd = npos;
-    }
-  else
-    {
-    /**********
-    * o found end?
-    * o save length
-    **********/
-
-    if (pfull [npos] != '>')
-      { continue; }
-    puri->len = npos - nfnd;
-    return 0;
-    }
-  }
-
-/**********
-* o begin w/o end?
-* o use whole string
-**********/
-
-if (nfnd)
-  { return -1; }
-puri->s = pfull;
-puri->len = nlen;
-return 0;
 }
 
 /**********
@@ -581,7 +519,7 @@ if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
   LM_ERR ("%sUnable to create totag", pfncname);
   return;
   }
-ncall_idx = create_call (pmsg, ptotag, mohq_idx);
+ncall_idx = create_call (mohq_idx, pmsg, ptotag);
 if (ncall_idx == -1)
   { return; }
 
@@ -625,6 +563,62 @@ if (pcall->call_state != CLSTA_RING)
 **********/
 
 send_rtp_answer (pmsg, ptotag, pcall);
+return;
+}
+
+/**********
+* Process NOTIFY Message
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue index
+* OUTPUT: none
+**********/
+
+void notify_msg (sip_msg_t *pmsg, int mohq_idx)
+
+{
+/**********
+* o get call ID
+* o record exists?
+* o waiting on REFER?
+**********/
+
+char *pfncname = "notify_msg: ";
+int ncall_idx = find_call (&pmsg->callid->body);
+if (ncall_idx == -1)
+  {
+  LM_ERR ("%sNot part of existing dialog", pfncname);
+  return;
+  }
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+if (pcall->call_state != CLSTA_RFRWAIT)
+  {
+  LM_ERR ("%sNot waiting on a REFER", pfncname);
+  return;
+  }
+
+/**********
+* check sipfrag???
+**********/
+
+/**********
+* o send OK
+* o destroy proxy
+* o teardown queue
+**********/
+
+sl_api_t *psl = pmod_data->psl;
+if (psl->freply (pmsg, 200, presp_ok) < 0)
+  { LM_ERR ("%sUnable to create reply", pfncname); }
+if (1)//??? teardown if done
+  { return; }
+else
+  {
+  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+    { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
+  }
+delete_call (pcall);
 return;
 }
 
@@ -886,6 +880,9 @@ switch (pmsg->REQ_METHOD)
     else
       { reinvite_msg (pmsg, mohq_idx, &pto_body->tag_value); }
     break;
+  case METHOD_NOTIFY:
+    notify_msg (pmsg, mohq_idx);
+    break;
   case METHOD_PRACK:
     prack_msg (pmsg, mohq_idx);
     break;
@@ -973,22 +970,26 @@ if (ncall_idx == pmod_data->call_cnt)
 
 /**********
 * form REFER headers
-* o find URI in from
+* o find URI/tag in from
 * o calculate basic size
 * o add Via size
 * o create buffer
 **********/
 
-str pruri [1];
-if (extract_uri (pcall->call_from, strlen (pcall->call_from), pruri))
+struct to_body ptob [1];
+parse_to (pcall->call_from, &pcall->call_from [strlen (pcall->call_from)],
+  ptob);
+if (ptob->error != PARSE_OK)
   {
   // should never happen
   LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
   return -1;
   }
+if (ptob->param_lst)
+  { free_to_params (ptob); }
 int npos1 = sizeof (prefermsg) // REFER template
 #if 0 //???
-  + pruri->len // request URI
+  + ptob->uri.len // request URI
   + strlen (pmod_data->pmohq_lst [nq_idx].mohq_uri) // From URI
   + strlen (pcall->call_tag) // From tag
   + strlen (pcall->call_id) // Call-ID
@@ -1015,14 +1016,14 @@ if (!pbuf)
   }
 sprintf (pbuf, prefermsg,
 #if 0 //???
-  STR_FMT (pruri), // request URI
+  STR_FMT (&ptob->uri), // request URI
   pmod_data->pmohq_lst [nq_idx].mohq_uri, pcall->call_tag, // From
   pcall->call_from, // To
   pcall->call_id, // Call-ID
   pvia [0], pvia [1], pvia [2], // Via
 #endif //???
   STR_FMT (puri), // Refer-To
-  STR_FMT (pruri)); // Referred-By
+  STR_FMT (&ptob->uri)); // Referred-By
 
 /**********
 * create dialog
@@ -1041,18 +1042,18 @@ pdlg->id.call_id.s = pcall->call_id;
 pdlg->id.call_id.len = strlen (pcall->call_id);
 pdlg->id.loc_tag.s = pcall->call_tag;
 pdlg->id.loc_tag.len = strlen (pcall->call_tag);
-// pdlg->id.rem_tag.s = 0;
-// pdlg->id.rem_tag.len = 0;
-pdlg->rem_target.s = pruri->s;
-pdlg->rem_target.len = pruri->len;
+pdlg->id.rem_tag.s = ptob->tag_value.s;
+pdlg->id.rem_tag.len = ptob->tag_value.len;
+pdlg->rem_target.s = ptob->uri.s;
+pdlg->rem_target.len = ptob->uri.len;
 pdlg->loc_uri.s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
-pdlg->rem_uri.s = pruri->s;
-pdlg->rem_uri.len = pruri->len;
+pdlg->rem_uri.s = ptob->uri.s;
+pdlg->rem_uri.len = ptob->uri.len;
 pdlg->state = DLG_CONFIRMED;
 
 /**********
-* send request
+* send REFER request
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
@@ -1060,16 +1061,44 @@ uac_req_t puac [1];
 str phdrs [1];
 phdrs->s = pbuf;
 phdrs->len = strlen (pbuf);
-set_uac_req (puac, prefer, phdrs, 0, pdlg, 0, 0, 0);
-if (ptm->t_request_within (puac))
+set_uac_req (puac, prefer, phdrs, 0, pdlg,
+  TMCB_LOCAL_COMPLETED, refer_cb, pcall);
+pcall->call_state = CLSTA_REFER;
+if (ptm->t_request_within (puac) < 0)
   {
+  pcall->call_state = CLSTA_INQUEUE;
   LM_ERR ("%sUnable to create REFER request!", pfncname);
   goto refererr;
   }
+//delete_call (pcall);//???
 
 refererr:
-pkg_free (pbuf);
+pkg_free (pdlg);
+//???pkg_free (pbuf);
 return 1;
+}
+
+/**********
+* REFER Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parms
+* OUTPUT: none
+**********/
+
+static void refer_cb
+  (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+
+{
+LM_INFO ("Referral reply=%d", pcbp->rpl->first_line.u.reply.statuscode);
+call_lst *pcall = (call_lst *)*pcbp->param;
+if (REPLY_CLASS (pcbp->rpl) == 2)
+  { pcall->call_state = CLSTA_RFRWAIT; }
+else
+  { pcall->call_state = CLSTA_INQUEUE; }
+return;
 }
 
 /**********

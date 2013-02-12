@@ -460,7 +460,7 @@ for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   * o if not last, replace current with last queue
   **********/
 
-  if (pqlst [nidx].mohq_flag &= MOHQF_CHK)
+  if (pqlst [nidx].mohq_flag & MOHQF_CHK)
     { continue; }
   if (0) /* ??? need to check */
     {
