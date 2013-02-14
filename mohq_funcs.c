@@ -43,25 +43,13 @@ str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
+str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
 
 char prefermsg [] =
   {
-#if 0 //???
-  "REFER %.*s SIP/2.0" SIPEOL
-  "CSeq: 1 REFER" SIPEOL
-  "From: <%s>;tag=%s" SIPEOL
-  "To: %s" SIPEOL
-  "Call-ID: %s" SIPEOL
-  "%s%s%s"
-  "User-Agent: " USRAGNT SIPEOL
-#endif //???
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%.*s>" SIPEOL
   "Referred-By: <%.*s>" SIPEOL
-#if 0 //???
-  "Content-Length: 0" SIPEOL
-  SIPEOL
-#endif //???
   };
 
 /**********
@@ -70,7 +58,7 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
-void refer_cb (struct cell *, int, struct tmcb_params *);
+static void refer_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, str *, call_lst *);
 int send_rtp_answer (sip_msg_t *, str *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
@@ -210,7 +198,7 @@ sl_api_t *psl = pmod_data->psl;
 if (psl->freply (pmsg, 200, presp_ok) < 0)
   { LM_ERR ("%sUnable to create reply", pfncname); }
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
-if (pcall->call_state != CLSTA_INQUEUE)
+if (pcall->call_state < CLSTA_INQUEUE)
   { LM_WARN ("%sEnding call before queue setup", pfncname); }
 else
   {
@@ -280,6 +268,14 @@ strncpy (pcall->call_from, pstr->s, pstr->len);
 pcall->call_from [pstr->len] = '\0';
 strncpy (pcall->call_tag, ptotag->s, ptotag->len);
 pcall->call_tag [ptotag->len] = '\0';
+if (!pmsg->contact)
+  { *pcall->call_contact = '\0'; }
+else
+  {
+  pstr = &pmsg->contact->body;
+  strncpy (pcall->call_contact, pstr->s, pstr->len);
+  pcall->call_contact [pstr->len] = '\0';
+  }
 
 /**********
 * extract Via
@@ -530,6 +526,7 @@ if (ncall_idx == -1)
 **********/
 
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+pcall->call_cseq = 1;
 if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
   {
   LM_ERR ("%sUnable to reply to INVITE", pfncname);
@@ -563,6 +560,7 @@ if (pcall->call_state != CLSTA_RING)
 **********/
 
 send_rtp_answer (pmsg, ptotag, pcall);
+pcall->call_cseq = 1;
 return;
 }
 
@@ -599,26 +597,57 @@ if (pcall->call_state != CLSTA_RFRWAIT)
   }
 
 /**********
-* check sipfrag???
+* o sipfrag?
+* o get status from body
 **********/
+
+if (!search_hdr_ext (pmsg->content_type, psipfrag))
+  {
+  LM_ERR ("%sNot a sipfrag type", pfncname);
+  return;
+  }
+str pbody [1];
+pbody->s = get_body (pmsg);
+if (pbody->s)
+  { pbody->len = pmsg->len - (int)(pbody->s - pmsg->buf); }
+/*
+* tricky code!
+* we go past the buffer end because parse_first_line needs more than the
+* first line but doesn't actually touch the data beyond it
+*/
+if (!pbody->len++)
+  {
+  LM_ERR ("%ssipfrag body missing", pfncname);
+  return;
+  }
+struct msg_start pstart [1];
+parse_first_line (pbody->s, pbody->len, pstart);
+if (pstart->type != SIP_REPLY)
+  {
+  LM_ERR ("%sreply missing", pfncname);
+  return;
+  }
 
 /**********
 * o send OK
-* o destroy proxy
-* o teardown queue
+* o respond to REFER status
 **********/
 
-sl_api_t *psl = pmod_data->psl;
-if (psl->freply (pmsg, 200, presp_ok) < 0)
-  { LM_ERR ("%sUnable to create reply", pfncname); }
-if (1)//??? teardown if done
-  { return; }
-else
+if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
-  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
-    { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
+  LM_ERR ("%sUnable to create reply", pfncname);
+  return;
   }
-delete_call (pcall);
+switch (pstart->u.reply.statuscode / 100)
+  {
+  case 1:
+    break;
+  case 2:
+    pcall->call_state = CLSTA_RFRDONE;
+    break;
+  default:
+    pcall->call_state = CLSTA_RFRFAIL;
+  }
 return;
 }
 
@@ -969,16 +998,13 @@ if (ncall_idx == pmod_data->call_cnt)
   }
 
 /**********
-* form REFER headers
 * o find URI/tag in from
-* o calculate basic size
-* o add Via size
-* o create buffer
+* o find target from contact or from header
 **********/
 
 struct to_body ptob [1];
-parse_to (pcall->call_from, &pcall->call_from [strlen (pcall->call_from)],
-  ptob);
+parse_to (pcall->call_from,
+  &pcall->call_from [strlen (pcall->call_from) + 1], ptob);
 if (ptob->error != PARSE_OK)
   {
   // should never happen
@@ -987,13 +1013,37 @@ if (ptob->error != PARSE_OK)
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
+struct to_body pcontact [1];
+str ptarget [1];
+if (!*pcall->call_contact)
+  {
+  ptarget->s = ptob->uri.s;
+  ptarget->len = ptob->uri.len;
+  }
+else
+  {
+  parse_to (pcall->call_contact,
+    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
+  if (pcontact->error != PARSE_OK)
+    {
+    // should never happen
+    LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
+    return -1;
+    }
+  if (pcontact->param_lst)
+    { free_to_params (pcontact); }
+  ptarget->s = pcontact->uri.s;
+  ptarget->len = pcontact->uri.len;
+  }
+
+/**********
+* form REFER headers
+* o calculate basic size
+* o add Via size
+* o create buffer
+**********/
+
 int npos1 = sizeof (prefermsg) // REFER template
-#if 0 //???
-  + ptob->uri.len // request URI
-  + strlen (pmod_data->pmohq_lst [nq_idx].mohq_uri) // From URI
-  + strlen (pcall->call_tag) // From tag
-  + strlen (pcall->call_id) // Call-ID
-#endif //???
   + puri->len // redirect URI
   + (strlen (pcall->call_from) * 2); // inqueue URI twice
 #if 0 //???
@@ -1015,13 +1065,6 @@ if (!pbuf)
   return -1;
   }
 sprintf (pbuf, prefermsg,
-#if 0 //???
-  STR_FMT (&ptob->uri), // request URI
-  pmod_data->pmohq_lst [nq_idx].mohq_uri, pcall->call_tag, // From
-  pcall->call_from, // To
-  pcall->call_id, // Call-ID
-  pvia [0], pvia [1], pvia [2], // Via
-#endif //???
   STR_FMT (puri), // Refer-To
   STR_FMT (&ptob->uri)); // Referred-By
 
@@ -1036,7 +1079,7 @@ if (!pdlg)
   goto refererr;
   }
 memset (pdlg, 0, sizeof (dlg_t));
-pdlg->loc_seq.value = 1; //??? need CSeq?
+pdlg->loc_seq.value = pcall->call_cseq++;
 pdlg->loc_seq.is_set = 1;
 pdlg->id.call_id.s = pcall->call_id;
 pdlg->id.call_id.len = strlen (pcall->call_id);
@@ -1044,8 +1087,8 @@ pdlg->id.loc_tag.s = pcall->call_tag;
 pdlg->id.loc_tag.len = strlen (pcall->call_tag);
 pdlg->id.rem_tag.s = ptob->tag_value.s;
 pdlg->id.rem_tag.len = ptob->tag_value.len;
-pdlg->rem_target.s = ptob->uri.s;
-pdlg->rem_target.len = ptob->uri.len;
+pdlg->rem_target.s = ptarget->s;
+pdlg->rem_target.len = ptarget->len;
 pdlg->loc_uri.s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
 pdlg->rem_uri.s = ptob->uri.s;
@@ -1070,10 +1113,31 @@ if (ptm->t_request_within (puac) < 0)
   LM_ERR ("%sUnable to create REFER request!", pfncname);
   goto refererr;
   }
-//delete_call (pcall);//???
+
+/**********
+* o wait for dialog to complete
+* o destroy proxy
+* o teardown queue
+**********/
+
+while (1)
+  {
+  usleep (USLEEP_LEN);
+  if (pcall->call_state > CLSTA_RFRWAIT)
+    { break; }
+  }
+if (pcall->call_state == CLSTA_RFRFAIL)
+  { pcall->call_state = CLSTA_INQUEUE; }
+else
+  {
+  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+    { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
+  delete_call (pcall);
+//??? send BYE?
+  }
 
 refererr:
-pkg_free (pdlg);
+//???pkg_free (pdlg);
 //???pkg_free (pbuf);
 return 1;
 }
@@ -1162,7 +1226,7 @@ int send_prov_rsp (sip_msg_t *pmsg, str *ptotag, call_lst *pcall)
 char *pfncname = "send_prov_rsp: ";
 tm_api_t *ptm = pmod_data->ptm;
 struct cell *ptrans = ptm->t_gett ();
-pcall->call_rseq = rand ();
+pcall->call_cseq = rand ();
 char phdrtmp [200];
 char phdrtmplt [] =
   "Accept-Language: en" SIPEOL
@@ -1171,7 +1235,7 @@ char phdrtmplt [] =
   "RSeq: %d" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
   ;
-sprintf (phdrtmp, phdrtmplt, pcall->call_rseq);
+sprintf (phdrtmp, phdrtmplt, pcall->call_cseq);
 str phdr [1];
 phdr->s = phdrtmp;
 phdr->len = strlen (phdrtmp);
@@ -1192,7 +1256,7 @@ update_call_rec (pconn, pcall);
 
 while (1)
   {
-  usleep (200);
+  usleep (USLEEP_LEN);
   if (pcall->call_state != CLSTA_PRING)
     { break; }
 //need to resend RING if no response???
@@ -1427,7 +1491,7 @@ update_call_rec (pconn, pcall);
 
 while (1)
   {
-  usleep (200);
+  usleep (USLEEP_LEN);
   if (pcall->call_state != CLSTA_INVITED)
     { break; }
 //need to resend OK if no response???

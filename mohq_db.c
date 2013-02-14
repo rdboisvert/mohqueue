@@ -50,6 +50,7 @@ static str *mohq_columns [] =
 **********/
 
 str CALLCSTR_CALL = STR_STATIC_INIT ("call_id");
+str CALLCSTR_CNTCT = STR_STATIC_INIT ("call_contact");
 str CALLCSTR_FROM = STR_STATIC_INIT ("call_from");
 str CALLCSTR_MOHQ = STR_STATIC_INIT ("mohq_id");
 str CALLCSTR_STATE = STR_STATIC_INIT ("call_state");
@@ -62,6 +63,7 @@ static str *call_columns [] =
   &CALLCSTR_MOHQ,
   &CALLCSTR_FROM,
   &CALLCSTR_CALL,
+  &CALLCSTR_CNTCT,
   &CALLCSTR_VIA,
   &CALLCSTR_TAG,
   &CALLCSTR_STATE,
@@ -112,6 +114,7 @@ void fill_call_vals (db_val_t *prvals, call_lst *pcall)
 set_call_val (prvals, CALLCOL_MOHQ, CALLCOL_MOHQ, &pcall->mohq_id);
 set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
 set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
+set_call_val (prvals, CALLCOL_CNTCT, CALLCOL_CNTCT, pcall->call_contact);
 set_call_val (prvals, CALLCOL_VIA, CALLCOL_VIA, pcall->call_via);
 set_call_val (prvals, CALLCOL_TAG, CALLCOL_TAG, pcall->call_tag);
 set_call_val (prvals, CALLCOL_STATE, CALLCOL_STATE, &pcall->call_state);
@@ -163,6 +166,7 @@ switch (ncolid)
     prvals [ncol].nul = 0;
     break;
   case CALLCOL_CALL:
+  case CALLCOL_CNTCT:
   case CALLCOL_FROM:
   case CALLCOL_TAG:
   case CALLCOL_VIA:
@@ -500,7 +504,7 @@ void wait_db_flush (db1_con_t *pconn, call_lst *pcall)
 if (pconn)
   {
   while (pcall->call_dirty)
-    { usleep (200); }
+    { usleep (USLEEP_LEN); }
   }
 pcall->call_dirty = 1;
 return;

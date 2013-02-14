@@ -13,4 +13,9 @@ Find out why URI wrong when build SIP msg from buffer.
 
 Need to use free_sip_msg ()?
 
-Accept-Language should be what is sent in INVITE
+Accept-Language should be what is sent in INVITE.
+
+Need to handle BYE before final NOTIFY on REFER.
+
+Document /etc/shorewall/rules changes.
+ACCEPT  fw      all     udp     -       9010:9099

@@ -41,14 +41,15 @@
 #define MOHQCOL_NAME  4
 
 /* mohqcalls columns */
-#define CALL_COLCNT   7
+#define CALL_COLCNT   8
 #define CALLCOL_MOHQ  0
 #define CALLCOL_FROM  1
 #define CALLCOL_CALL  2
-#define CALLCOL_VIA   3
-#define CALLCOL_TAG   4
-#define CALLCOL_STATE 5
-#define CALLCOL_TIME  6
+#define CALLCOL_CNTCT 3
+#define CALLCOL_VIA   4
+#define CALLCOL_TAG   5
+#define CALLCOL_STATE 6
+#define CALLCOL_TIME  7
 
 /**********
 * DB function declarations

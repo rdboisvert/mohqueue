@@ -29,6 +29,7 @@
 **********/
 
 #define URI_LEN 100
+#define USLEEP_LEN  100
 
 /**********
 * structures
@@ -55,7 +56,10 @@ typedef struct
 #define CLSTA_INVITED   0x04
 #define CLSTA_ACKED     0x05
 #define CLSTA_INQUEUE   0x06
-#define CLSTA_ENDCALL   0x07
+#define CLSTA_REFER     0x07
+#define CLSTA_RFRWAIT   0x08
+#define CLSTA_RFRDONE   0x09
+#define CLSTA_RFRFAIL   0x0A
 #define CLSTA_ERR       0xFF
 
 typedef struct
@@ -64,10 +68,11 @@ typedef struct
   int call_active;
   char call_id [101];
   char call_from [URI_LEN + 1];
+  char call_contact [URI_LEN + 1];
   char call_tag [101];
   char call_via [1024];
   int call_state;
-  int call_rseq;
+  int call_cseq;
   int mohq_id;
   } call_lst;
 
