@@ -288,9 +288,9 @@ void mod_destroy (void)
 LM_INFO ("???module destroy");
 if (!pmod_data)
   { return; }
-if (pmod_data->mohq_cnt)
+if (pmod_data->pmohq_lst)
   { shm_free (pmod_data->pmohq_lst); }
-if (pmod_data->call_cnt)
+if (pmod_data->pcall_lst)
   { shm_free (pmod_data->pcall_lst); }
 shm_free (pmod_data);
 return;
@@ -356,8 +356,8 @@ if (!pmod_data->fn_rtp_offer)
   LM_ERR ("Unable to load rtpproxy_offer");
   goto initerr;
   }
-pmod_data->fn_rtp_stream2uac = find_export ("rtpproxy_stream2uac", 2, 0);
-if (!pmod_data->fn_rtp_stream2uac)
+pmod_data->fn_rtp_stream2 = find_export ("rtpproxy_stream2uac", 2, 0);
+if (!pmod_data->fn_rtp_stream2)
   {
   LM_ERR ("Unable to load rtpproxy_stream2uac");
   goto initerr;

@@ -50,17 +50,16 @@ typedef struct
   } mohq_lst;
 
 /* call_state values */
-#define CLSTA_PRING     0x01
-#define CLSTA_PRINGACK  0x02
-#define CLSTA_RING      0x03
-#define CLSTA_INVITED   0x04
-#define CLSTA_ACKED     0x05
-#define CLSTA_INQUEUE   0x06
-#define CLSTA_REFER     0x07
-#define CLSTA_RFRWAIT   0x08
-#define CLSTA_RFRDONE   0x09
-#define CLSTA_RFRFAIL   0x0A
-#define CLSTA_ERR       0xFF
+#define CLSTA_PRACKSTRT 100
+#define CLSTA_PRACKRPLY 101
+#define CLSTA_RINGING   102
+#define CLSTA_INVITED   103
+#define CLSTA_INQUEUE   200
+#define CLSTA_REFER     201
+#define CLSTA_RFRWAIT   202
+#define CLSTA_RFRDONE   203
+#define CLSTA_RFRFAIL   204
+#define CLSTA_ERR       900
 
 typedef struct
   {
@@ -74,6 +73,9 @@ typedef struct
   int call_state;
   int call_cseq;
   int mohq_id;
+  unsigned int call_hash;
+  unsigned int call_label;
+  sip_msg_t *call_pmsg;
   } call_lst;
 
 typedef struct
@@ -98,7 +100,7 @@ typedef struct
   cmd_function fn_rtp_answer;
   cmd_function fn_rtp_destroy;
   cmd_function fn_rtp_offer;
-  cmd_function fn_rtp_stream2uac;
+  cmd_function fn_rtp_stream2;
   } mod_data;
 
 /**********
