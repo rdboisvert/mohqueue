@@ -58,6 +58,7 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
+static void invite_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
@@ -71,16 +72,6 @@ db1_con_t *pconn;
 /**********
 * local functions
 **********/
-
-static void refer_cb (struct cell *, int, struct tmcb_params *);//???
-
-void cbtest (struct cell *ptrans, int type, struct tmcb_params *params)//???
-{
-if (type == TMCB_DESTROY)
-  { LM_INFO ("callback DESTROY on %d, %d", ptrans->hash_index, ptrans->label); }
-else
-  { LM_INFO ("callback type=%d", type); }
-}
 
 /**********
 * Process ACK Message
@@ -461,13 +452,6 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     return;
     }
   }
-if (!search_hdr_ext (pmsg->allow, prefer))
-  {
-  LM_ERR ("%sINVITE lacks ability to use REFER", pfncname);
-  if (ptm->t_reply (pmsg, 603, "INVITE lacks REFER") < 0)
-    { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
-  return;
-  }
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_offer refused", pfncname);
@@ -491,19 +475,42 @@ if (ncall_idx == -1)
   { return; }
 
 /**********
+* o catch failures
 * o send working response
+* o add contact to reply
 * o supports/requires PRACK? (RFC 3262 section 3)
 * o exit if not ringing
 **********/
 
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+pcall = &pmod_data->pcall_lst [ncall_idx];
 pcall->call_cseq = 1;
+if (ptm->register_tmcb (pmsg, 0, TMCB_ON_FAILURE | TMCB_DESTROY,
+  invite_cb, pcall, 0) < 0)
+  {
+  LM_ERR ("unable to set callback");
+  delete_call (pcall);
+  return;
+  }
 if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
   {
   LM_ERR ("%sUnable to reply to INVITE", pfncname);
   delete_call (pcall);
   return;
   }
+str pcontact [1];
+char *pcontacthdr = "Contact: <%s>" SIPEOL;
+pcontact->s = pkg_malloc (strlen (pcall->call_contact) + strlen (pcontacthdr));
+if (!pcontact->s)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  delete_call (pcall);
+  return;
+  }
+sprintf (pcontact->s, pcontacthdr, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
+pcontact->len = strlen (pcontact->s);
+if (!add_lump_rpl2 (pmsg, pcontact->s, pcontact->len, LUMP_RPL_HDR))
+  { LM_ERR ("%sUnable to add contact", pfncname); }
+pkg_free (pcontact->s);
 pcall->call_pmsg = pmsg;
 struct cell *ptrans = ptm->t_gett ();
 pcall->call_hash = ptrans->hash_index;
@@ -531,6 +538,33 @@ else
 
 send_rtp_answer (pmsg, pcall);
 return;
+}
+
+/**********
+* Invite Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parms
+* OUTPUT: none
+**********/
+
+static void invite_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+
+{
+call_lst *pcall = (call_lst *)*pcbp->param;
+switch (pcall->call_state)
+  {
+  case CLSTA_PRACKSTRT:
+    LM_ERR ("No provisional response received!");
+    pcall->call_state = CLSTA_ERR;
+    break;
+  case CLSTA_INVITED:
+    LM_ERR ("INVITE failed");
+    delete_call (pcall);
+    break;
+  }
 }
 
 /**********
@@ -568,6 +602,7 @@ if (pcall->call_state != CLSTA_RFRWAIT)
 /**********
 * o sipfrag?
 * o get status from body
+* o add CRLF so parser can go beyond first line
 **********/
 
 if (!search_hdr_ext (pmsg->content_type, psipfrag))
@@ -575,23 +610,29 @@ if (!search_hdr_ext (pmsg->content_type, psipfrag))
   LM_ERR ("%sNot a sipfrag type", pfncname);
   return;
   }
-str pbody [1];
-pbody->len = 0;// avoids complaint from compiler about uninitialized
-pbody->s = get_body (pmsg);
-if (pbody->s)
-  { pbody->len = pmsg->len - (int)(pbody->s - pmsg->buf); }
-/*
-* tricky code!
-* we go past the buffer end because parse_first_line needs more than the
-* first line but doesn't actually touch the data beyond it
-*/
-if (!pbody->len++)
+char *pfrag = get_body (pmsg);
+if (!pfrag)
   {
   LM_ERR ("%ssipfrag body missing", pfncname);
   return;
   }
+str pbody [1];
+pbody->len = pmsg->len - (int)(pfrag - pmsg->buf);
+pbody->s = pkg_malloc (pbody->len + 2);
+if (!pbody->s)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  return;
+  }
+strncpy (pbody->s, pfrag, pbody->len);
+if (pbody->s [pbody->len - 1] != '\n')
+  {
+  strncpy (&pbody->s [pbody->len], SIPEOL, 2);
+  pbody->len += 2;
+  }
 struct msg_start pstart [1];
-parse_first_line (pbody->s, pbody->len, pstart);
+parse_first_line (pbody->s, pbody->len + 1, pstart);
+pkg_free (pbody->s);
 if (pstart->type != SIP_REPLY)
   {
   LM_ERR ("%sreply missing", pfncname);
@@ -925,7 +966,6 @@ int mohq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
 * o check URI
 **********/
 
-return -1;//???
 char *pfncname = "mohq_redirect: ";
 str puri [1], pqname [1];
 if (!pqueue || !pURI)
@@ -1095,7 +1135,7 @@ if (ptm->t_request_within (puac) < 0)
   goto refererr;
   }
 LM_INFO ("%sSent REFER request!", pfncname);
-#if 0 //???
+
 /**********
 * o wait for dialog to complete
 * o destroy proxy
@@ -1121,12 +1161,11 @@ LM_INFO ("%sdeleting call", pfncname);
 //??? send BYE?
   }
 pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
-#endif
 
 refererr:
 //???pkg_free (pdlg);
 //???pkg_free (pbuf);
-return 1;
+return 0;
 }
 
 /**********
@@ -1221,7 +1260,9 @@ char *phdrtmplt =
   "User-Agent: " USRAGNT SIPEOL
   ;
 sprintf (phdrtmp, phdrtmplt, pcall->call_cseq);
-if (!add_lump_rpl2 (pmsg, phdrtmp, strlen (phdrtmp), LUMP_RPL_HDR))
+struct lump_rpl **phdrlump = add_lump_rpl2 (pmsg, phdrtmp,
+  strlen (phdrtmp), LUMP_RPL_HDR);
+if (!phdrlump)
   {
   LM_ERR ("%sUnable to reply with new header", pfncname);
   return 0;
@@ -1236,7 +1277,8 @@ pcall->call_state = CLSTA_PRACKSTRT;
 update_call_rec (pconn, pcall);
 
 /**********
-* wait until PRACK acknowledged
+* o wait until PRACK
+* o remove header lump
 **********/
 
 while (1)
@@ -1244,8 +1286,10 @@ while (1)
   usleep (USLEEP_LEN);
   if (pcall->call_state != CLSTA_PRACKSTRT)
     { break; }
-//need to resend RING if no response???
   }
+unlink_lump_rpl (pmsg, *phdrlump);
+if (pcall->call_state != CLSTA_PRACKRPLY)
+  { return 0; }
 return 1;
 }
 
@@ -1267,20 +1311,18 @@ int send_rtp_answer (sip_msg_t *pmsg, call_lst *pcall)
 
 char *pfncname = "send_rtp_answer: ";
 tm_api_t *ptm = pmod_data->ptm;
-print_trans ("send_rtp_answer");
 struct cell *ptrans = ptm->t_gett ();
 str ptotag [1];
 ptotag->s = pcall->call_tag;
 ptotag->len = strlen (pcall->call_tag);
 str pbuf [1];
 struct bookmark pBM [1];
-int nrc = 0;
 pbuf->s = build_res_buf_from_sip_req (200, presp_ok, ptotag, ptrans->uas.request,
   (unsigned int *)&pbuf->len, pBM);
 if (!pbuf->s || !pbuf->len)
   {
   LM_ERR ("%sUnable to build response", pfncname);
-  goto answer_done;
+  return 0;
   }
 
 /**********
@@ -1342,7 +1384,7 @@ for (npos1 = 0; npos1 < pbuf->len; npos1++)
 str pextrahdr [1] =
   {
   STR_STATIC_INIT (
-  "Allow: INVITE, ACK, BYE, CANCEL, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  "Contact: <sip:9001@10.211.64.12>" SIPEOL //???
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
@@ -1400,7 +1442,7 @@ npos1 += npos2;
 npos2 = pSDP->len;
 memcpy (&pnewbuf [npos1], pSDP->s, npos2);
 npos1 += npos2;
-//pkg_free (pbuf->s);
+pkg_free (pbuf->s);
 pbuf->s = pnewbuf;
 pbuf->len = npos1;
 
@@ -1410,7 +1452,7 @@ pbuf->len = npos1;
 
 struct sip_msg pnmsg [1];
 build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 0);
-memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info)); //??? cheating
+memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 
 /**********
 * send rtpproxy answer
@@ -1435,9 +1477,9 @@ if (pmod_data->fn_rtp_stream2 (pnmsg, (char *)pmodel, (char *)-1) != 1)
 * o find SDP
 **********/
 
-//???pkg_free (pbuf->s);
 pbuf->s = build_res_buf_from_sip_res (pnmsg, (unsigned int *)&pbuf->len);
-//???free_sip_msg (pnmsg);
+pkg_free (pnewbuf);
+free_sip_msg (pnmsg);
 if (!pbuf->s || !pbuf->len)
   {
   LM_ERR ("%sUnable to build new response", pfncname);
@@ -1476,16 +1518,13 @@ if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
 wait_db_flush (pconn, pcall);
 pcall->call_state = CLSTA_INVITED;
 update_call_rec (pconn, pcall);
-nrc = 1;
+return 1;
 
 /**********
 * free buffer and return
 **********/
 
 answer_done:
-#if 0 //???
-if (pbuf->s)
-  { pkg_free (pbuf->s); }
-#endif
-return nrc;
+pkg_free (pbuf->s);
+return 0;
 }
