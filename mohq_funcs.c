@@ -42,6 +42,7 @@ str p100rel [1] = {STR_STATIC_INIT ("100rel")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str preferby [1] = {STR_STATIC_INIT ("Referred-By")};
+str presp_busy [1] = {STR_STATIC_INIT ("Busy here")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
@@ -83,6 +84,7 @@ void delete_call (call_lst *);
 int find_call (str *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
+static void refer_invite_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
@@ -259,7 +261,7 @@ char *psdp = 0;
 char *phdr = pkg_malloc (npos1);
 if (!phdr)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   return 0;
   }
 sprintf (phdr, pinvitemsg, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
@@ -283,7 +285,7 @@ npos1 = sizeof (pinvitesdp) // INVITE template
 psdp = pkg_malloc (npos1);
 if (!psdp)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   goto hold_err;
   }
 sprintf (psdp, pinvitesdp,
@@ -308,7 +310,7 @@ pbody->len += 22;
 pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
 if (!pdlg)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   goto hold_err;
   }
 memset (pdlg, 0, sizeof (dlg_t));
@@ -398,7 +400,7 @@ if (ncall_idx == pmod_data->call_cnt)
     }
   if (!pmod_data->pcall_lst)
     {
-    LM_ERR ("%sUnable to allocate shared memory", pfncname);
+    LM_ERR ("%sUnable to allocate shared memory!", pfncname);
     pmod_data->call_cnt = 0;
     return -1;
     }
@@ -668,6 +670,7 @@ void first_invite_msg (sip_msg_t *pmsg, int mohq_idx)
 
 char *pfncname = "first_invite_msg: ";
 tm_api_t *ptm = pmod_data->ptm;
+call_lst *pcall;
 int ncall_idx = find_call (&pmsg->callid->body);
 if (ncall_idx != -1)
   {
@@ -748,7 +751,7 @@ pcontact->s = pkg_malloc (strlen (pmod_data->pmohq_lst [mohq_idx].mohq_uri)
   + strlen (pcontacthdr));
 if (!pcontact->s)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   delete_call (pcall);
   return;
   }
@@ -796,8 +799,8 @@ return;
 * OUTPUT: none
 **********/
 
-static void hold_cb
-  (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+static void
+  hold_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
 
 {
 call_lst *pcall = (call_lst *)*pcbp->param;
@@ -835,7 +838,8 @@ return;
 * OUTPUT: none
 **********/
 
-static void invite_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+static void
+  invite_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
 
 {
 call_lst *pcall = (call_lst *)*pcbp->param;
@@ -906,7 +910,7 @@ pbody->len = pmsg->len - (int)(pfrag - pmsg->buf);
 pbody->s = pkg_malloc (pbody->len + 2);
 if (!pbody->s)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   return;
   }
 strncpy (pbody->s, pfrag, pbody->len);
@@ -1017,6 +1021,111 @@ return;
 }
 
 /**********
+* Referred Invite
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+* OUTPUT: none
+**********/
+
+void refer_invite (sip_msg_t *pmsg)
+
+{
+/**********
+* o INVITE?
+* o Referred-By that matches call?
+**********/
+
+char *pfncname = "refer_invite: ";
+if (pmsg->REQ_METHOD != METHOD_INVITE)
+  { return; }
+hdr_field_t *phfld;
+call_lst *pcall;
+int nrefer_idx;
+for (phfld = pmsg->headers; phfld; phfld = phfld->next)
+  {
+  /**********
+  * o find referred-by
+  * o find matching call
+  * o check state
+  * o catch replies
+  **********/
+
+  if (cmp_hdrname_str (&phfld->name, preferby))
+    { continue; }
+  nrefer_idx = find_referred_call (&phfld->body);
+  if (nrefer_idx == -1)
+    { continue; }
+  pcall = &pmod_data->pcall_lst [nrefer_idx];
+  if (pcall->call_state != CLSTA_RFRWAIT && pcall->call_state != CLSTA_REFER)
+    { continue; }
+  if (pmod_data->ptm->register_tmcb (pmsg, 0, TMCB_RESPONSE_IN,
+    refer_invite_cb, 0, 0) < 0)
+    { LM_ERR ("%sUnable to set callback!", pfncname); }
+  break;
+  }
+return;
+}
+
+/**********
+* Refer Invite Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parms
+* OUTPUT: none
+**********/
+
+static void
+  refer_invite_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+
+{
+/**********
+* o error code?
+* o rewrite code to buffer
+* o deleted reason lump
+* o clone reason phrase
+* o insert new reason lump
+**********/
+
+char *pfncname = "refer_invite_cb: ";
+sip_msg_t *pmsg = pcbp->rpl;
+LM_INFO ("refer invite callback reply=%d", pmsg->first_line.u.reply.statuscode);//???
+if (REPLY_CLASS (pmsg) <= 2)
+  { return; }
+LM_INFO ("NEED TO CHANGE REPLY!");
+int ncode = 486;
+pmsg->first_line.u.reply.statuscode = ncode;
+pmsg->first_line.u.reply.status.s [2] = ncode % 10 + '0';
+ncode /= 10;
+pmsg->first_line.u.reply.status.s [1] = ncode % 10 + '0';
+ncode /= 10;
+pmsg->first_line.u.reply.status.s [0] = ncode + '0';
+struct lump *plump = del_lump (pmsg,
+  pmsg->first_line.u.reply.reason.s - pmsg->buf,
+  pmsg->first_line.u.reply.reason.len, 0);
+if (!plump)
+  {
+  LM_ERR ("%s: Unable to delete lump!", pfncname);
+  return;
+  }
+char *preason = (char *) pkg_malloc (presp_busy->len);
+if (!preason)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  return;
+  }
+memcpy (preason, presp_busy->s, presp_busy->len);
+if (!insert_new_lump_after (plump, preason, presp_busy->len, 0))
+  {
+  LM_ERR ("%s: Unable to add lump!", pfncname);
+  pkg_free (preason);
+  return;
+  }
+}
+
+/**********
 * Process reINVITE Message
 *
 * INPUT:
@@ -1050,7 +1159,7 @@ char *form_tmpstr (str *pstr)
 char *pcstr = malloc (pstr->len + 1);
 if (!pcstr)
   {
-  LM_ERR ("Unable to allocate local memory!");
+  LM_ERR ("No more memory!");
   return NULL;
   }
 memcpy (pcstr, pstr->s, pstr->len);
@@ -1194,10 +1303,19 @@ if (!tmpstr)
   { return -1; }
 int mohq_idx = find_mohq_id (tmpstr);
 free_tmpstr (tmpstr);
-if (mohq_idx < 0)
-  { return -1; }
 pconn = mohq_dbconnect ();
-if (pconn)
+if (mohq_idx < 0)
+  {
+  /**********
+  * check for referred call
+  **********/
+
+  refer_invite (pmsg);
+  if (pconn)
+    { mohq_dbdisconnect (pconn); }
+  return -1;
+  }
+if (pconn) //??? will never update if existing not there
   { update_mohq_lst (pconn); }
 else
   { LM_WARN ("Unable to connect to DB"); }
@@ -1334,7 +1452,7 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
-#if 1 //???
+#if 0 //???
 puri->s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
 puri->len = strlen (puri->s);
 #endif
@@ -1380,7 +1498,7 @@ dlg_t *pdlg = 0;
 char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
 pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   return -1;
   }
@@ -1707,7 +1825,7 @@ npos1 += pextrahdr->len + strlen (pbodylen) + pSDP->len + 1;
 char *pnewbuf = pkg_malloc (npos1);
 if (!pnewbuf)
   {
-  LM_ERR ("%sNo more memory", pfncname);
+  LM_ERR ("%sNo more memory!", pfncname);
   goto answer_done;
   }
 for (npos1 = npos2 = 0; npos2 < nhdrcnt; npos2++)
