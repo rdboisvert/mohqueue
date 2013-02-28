@@ -41,9 +41,32 @@
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
+str preferby [1] = {STR_STATIC_INIT ("Referred-By")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
+
+char pinvitemsg [] =
+  {
+  "Max-Forwards: 70" SIPEOL
+  "Contact: <%s>" SIPEOL
+  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  "Supported: 100rel,replaces" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  "Accept-Language: en" SIPEOL
+  "Content-Type: application/sdp" SIPEOL
+  };
+
+char pinvitesdp [] =
+  {
+  "v=0" SIPEOL
+  "o=- %d %d IN IP4 %s" SIPEOL
+  "s=" USRAGNT SIPEOL
+  "c=IN IP4 %s" SIPEOL
+  "t=0 0" SIPEOL
+  "a=send%s" SIPEOL
+  "m=audio %d RTP/AVP "
+  };
 
 char prefermsg [] =
   {
@@ -58,6 +81,7 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
+static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
@@ -169,6 +193,173 @@ else
   }
 delete_call (pcall);
 return;
+}
+
+/**********
+* Change Hold
+*
+* INPUT:
+*   Arg (1) = queue index
+*   Arg (2) = call pointer
+*   Arg (3) = hold flag
+* OUTPUT: 0 if failed
+**********/
+
+int change_hold (int mohq_idx, call_lst *pcall, int bhold)
+
+{
+/**********
+* form INVITE header
+* o find URI/tag in from
+* o find target from contact or from header
+* o calculate size
+* o create buffer
+**********/
+
+char *pfncname = "change_hold: ";
+tm_api_t *ptm = pmod_data->ptm;
+int nret = 0;
+struct to_body ptob [1];
+parse_to (pcall->call_from, &pcall->call_from [strlen (pcall->call_from) + 1],
+  ptob);
+if (ptob->error != PARSE_OK)
+  {
+  // should never happen
+  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
+  return 0;
+  }
+if (ptob->param_lst)
+  { free_to_params (ptob); }
+struct to_body pcontact [1];
+str ptarget [1];
+if (!*pcall->call_contact)
+  {
+  ptarget->s = ptob->uri.s;
+  ptarget->len = ptob->uri.len;
+  }
+else
+  {
+  parse_to (pcall->call_contact,
+    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
+  if (pcontact->error != PARSE_OK)
+    {
+    // should never happen
+    LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
+    return 0;
+    }
+  if (pcontact->param_lst)
+    { free_to_params (pcontact); }
+  ptarget->s = pcontact->uri.s;
+  ptarget->len = pcontact->uri.len;
+  }
+int npos1 = sizeof (pinvitemsg) // INVITE template
+  + strlen (pmod_data->pmohq_lst [mohq_idx].mohq_uri); // contact
+dlg_t *pdlg = 0;
+char *psdp = 0;
+char *phdr = pkg_malloc (npos1);
+if (!phdr)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  return 0;
+  }
+sprintf (phdr, pinvitemsg, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
+str phdrs [1];
+phdrs->s = phdr;
+phdrs->len = strlen (phdr);
+
+/**********
+* form INVITE body
+* o calculate size
+* o create buffer
+**********/
+
+int npos2 = 1; //???
+npos1 = sizeof (pinvitesdp) // INVITE template
+  + 20 // session id + version
+  + 30 // server IP address twice
+  + 4  // send type
+  + 5  // media port number
+  + (npos2 * 40); // media types
+psdp = pkg_malloc (npos1);
+if (!psdp)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  goto hold_err;
+  }
+sprintf (psdp, pinvitesdp,
+  time (0), time (0) + 1, // session id + version
+  "10.211.64.5", "10.211.64.5", // server IP address ???
+  bhold ? "only" : "recv", // hold type
+  pcall->call_aport); // audio port
+str pbody [1];
+pbody->s = psdp;
+pbody->len = strlen (psdp);
+strcpy (&psdp [pbody->len], "8"); //???
+pbody->len += 1;
+strcpy (&psdp [pbody->len], SIPEOL);
+pbody->len += 2;
+strcpy (&psdp [pbody->len], "a=rtpmap:8 PCMA/8000" SIPEOL); //???
+pbody->len += 22;
+
+/**********
+* create dialog
+**********/
+
+pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
+if (!pdlg)
+  {
+  LM_ERR ("%sNo more memory", pfncname);
+  goto hold_err;
+  }
+memset (pdlg, 0, sizeof (dlg_t));
+pdlg->loc_seq.value = pcall->call_cseq++;
+pdlg->loc_seq.is_set = 1;
+pdlg->id.call_id.s = pcall->call_id;
+pdlg->id.call_id.len = strlen (pcall->call_id);
+pdlg->id.loc_tag.s = pcall->call_tag;
+pdlg->id.loc_tag.len = strlen (pcall->call_tag);
+pdlg->id.rem_tag.s = ptob->tag_value.s;
+pdlg->id.rem_tag.len = ptob->tag_value.len;
+pdlg->rem_target.s = ptarget->s;
+pdlg->rem_target.len = ptarget->len;
+pdlg->loc_uri.s = pmod_data->pmohq_lst [mohq_idx].mohq_uri;
+pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
+pdlg->rem_uri.s = ptob->uri.s;
+pdlg->rem_uri.len = ptob->uri.len;
+
+/**********
+* send INVITE request
+**********/
+
+uac_req_t puac [1];
+set_uac_req (puac, pinvite, phdrs, pbody, pdlg,
+   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, hold_cb, pcall);
+pcall->call_state = CLSTA_HOLDSTRT;
+if (ptm->t_request_within (puac) < 0)
+  { pcall->call_state = CLSTA_HOLDFAIL; }
+
+/**********
+* wait for hold to complete
+**********/
+
+while (1)
+  {
+  usleep (USLEEP_LEN);
+  if (pcall->call_state != CLSTA_HOLDSTRT)
+    { break; }
+  }
+if (pcall->call_state == CLSTA_HOLDOK)
+  { nret = 1; }
+else
+  { LM_ERR ("%sSend hold failed!", pfncname); }
+
+hold_err:
+if (pdlg)
+  { pkg_free (pdlg); }
+if (psdp)
+  { pkg_free (psdp); }
+pkg_free (phdr);
+return nret;
 }
 
 /**********
@@ -405,6 +596,60 @@ return -1;
 }
 
 /**********
+* Find Referred Call
+*
+* INPUT:
+*   Arg (1) = referred-by value
+* OUTPUT: call index; -1 if unable to find
+**********/
+
+int find_referred_call (str *pvalue)
+
+{
+/**********
+* get URI
+**********/
+
+struct to_body pref [1];
+parse_to (pvalue->s, &pvalue->s [pvalue->len + 1], pref);
+if (pref->error != PARSE_OK)
+  {
+  // should never happen
+  LM_ERR ("Invalid Referred-By URI (%.*s)!", STR_FMT (pvalue));
+  return -1;
+  }
+if (pref->param_lst)
+  { free_to_params (pref); }
+
+/**********
+* search calls for matching
+**********/
+
+int nidx;
+str tmpstr;
+struct to_body pfrom [1];
+for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+  {
+  if (!pmod_data->pcall_lst [nidx].call_active)
+    { continue; }
+  tmpstr.s = pmod_data->pcall_lst [nidx].call_from;
+  tmpstr.len = strlen (tmpstr.s);
+  parse_to (tmpstr.s, &tmpstr.s [tmpstr.len + 1], pfrom);
+  if (pfrom->error != PARSE_OK)
+    {
+    // should never happen
+    LM_ERR ("Invalid From URI (%.*s)!", STR_FMT (&tmpstr));
+    continue;
+    }
+  if (pfrom->param_lst)
+    { free_to_params (pfrom); }
+  if (STR_EQ (pfrom->uri, pref->uri))
+    { return nidx; }
+  }
+return -1;
+}
+
+/**********
 * Process First INVITE Message
 *
 * INPUT:
@@ -499,7 +744,8 @@ if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
   }
 str pcontact [1];
 char *pcontacthdr = "Contact: <%s>" SIPEOL;
-pcontact->s = pkg_malloc (strlen (pcall->call_contact) + strlen (pcontacthdr));
+pcontact->s = pkg_malloc (strlen (pmod_data->pmohq_lst [mohq_idx].mohq_uri)
+  + strlen (pcontacthdr));
 if (!pcontact->s)
   {
   LM_ERR ("%sNo more memory", pfncname);
@@ -537,6 +783,45 @@ else
 **********/
 
 send_rtp_answer (pmsg, pcall);
+return;
+}
+
+/**********
+* Hold Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parms
+* OUTPUT: none
+**********/
+
+static void hold_cb
+  (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+
+{
+call_lst *pcall = (call_lst *)*pcbp->param;
+switch (ntype)
+  {
+  case TMCB_DESTROY:
+    LM_INFO ("hold callback DESTROY");//???
+    break;
+  case TMCB_ON_FAILURE:
+    LM_INFO ("hold callback FAILURE");//???
+    pcall->call_state = CLSTA_HOLDFAIL;
+    break;
+  case TMCB_LOCAL_COMPLETED:
+    LM_INFO ("hold callback COMPLETE, reply=%d",
+      pcbp->rpl->first_line.u.reply.statuscode);//???
+    if (pcbp->rpl->first_line.u.reply.statuscode == 200)
+      { pcall->call_state = CLSTA_HOLDOK; }
+    else
+      { pcall->call_state = CLSTA_HOLDFAIL; }
+    break;
+  default:
+    LM_INFO ("hold callback %d", ntype);//???
+    break;
+  }
 return;
 }
 
@@ -655,10 +940,20 @@ switch (pstart->u.reply.statuscode / 100)
   case 1:
     break;
   case 2:
-    pcall->call_state = CLSTA_RFRDONE;
+    /**********
+    * o delete MOH connection
+    * o delete call
+    **********/
+
+LM_INFO ("%sdestoying rtpproxy", pfncname);
+    if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+      { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
+LM_INFO ("%sdeleting call", pfncname);
+    delete_call (pcall);
     break;
   default:
-    pcall->call_state = CLSTA_RFRFAIL;
+    pcall->call_state = CLSTA_INQUEUE;
+    LM_ERR ("%sUnable to redirect call", pfncname);
   }
 return;
 }
@@ -1019,7 +1314,7 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   }
 
 /**********
-* form REFER headers
+* form REFER message
 * o find URI/tag in from
 * o find target from contact or from header
 * o calculate basic size
@@ -1039,6 +1334,10 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
+#if 1 //???
+puri->s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
+puri->len = strlen (puri->s);
+#endif
 struct to_body pcontact [1];
 str ptarget [1];
 if (!*pcall->call_contact)
@@ -1063,8 +1362,8 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   ptarget->len = pcontact->uri.len;
   }
 int npos1 = sizeof (prefermsg) // REFER template
-  + puri->len // redirect URI
-  + (strlen (pcall->call_from) * 2); // inqueue URI twice
+  + puri->len // Refer-To
+  + ptob->uri.len; // Referred-By
 #if 0 //???
 char *pvia [3];
 if (!pcall->call_via [0])
@@ -1077,6 +1376,7 @@ else
   pvia [2] = SIPEOL;
   }
 #endif //???
+dlg_t *pdlg = 0;
 char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
@@ -1092,7 +1392,7 @@ sprintf (pbuf, prefermsg,
 * create dialog
 **********/
 
-dlg_t *pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
+pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
 if (!pdlg)
   {
   LM_ERR ("%sNo more memory", pfncname);
@@ -1125,7 +1425,7 @@ str phdrs [1];
 phdrs->s = pbuf;
 phdrs->len = strlen (pbuf);
 set_uac_req (puac, prefer, phdrs, 0, pdlg,
-  TMCB_LOCAL_COMPLETED, refer_cb, pcall);
+  TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, refer_cb, pcall);
 pcall->call_state = CLSTA_REFER;
 pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
 if (ptm->t_request_within (puac) < 0)
@@ -1136,35 +1436,11 @@ if (ptm->t_request_within (puac) < 0)
   }
 LM_INFO ("%sSent REFER request!", pfncname);
 
-/**********
-* o wait for dialog to complete
-* o destroy proxy
-* o teardown queue
-**********/
-
-while (1)
-  {
-  usleep (USLEEP_LEN);
-  if (pcall->call_state > CLSTA_RFRWAIT)
-    { break; }
-  }
-LM_INFO ("%sREFER done!", pfncname);
-if (pcall->call_state == CLSTA_RFRFAIL)
-  { pcall->call_state = CLSTA_INQUEUE; }
-else
-  {
-LM_INFO ("%sdestoying rtpproxy", pfncname);
-  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
-    { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
-LM_INFO ("%sdeleting call", pfncname);
-  delete_call (pcall);
-//??? send BYE?
-  }
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
-
 refererr:
-//???pkg_free (pdlg);
-//???pkg_free (pbuf);
+pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
+if (pdlg)
+  { pkg_free (pdlg); }
+pkg_free (pbuf);
 return 0;
 }
 
@@ -1182,8 +1458,14 @@ static void refer_cb
   (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
 
 {
-LM_INFO ("Referral reply=%d", pcbp->rpl->first_line.u.reply.statuscode);
 call_lst *pcall = (call_lst *)*pcbp->param;
+if (ntype == TMCB_ON_FAILURE)
+  {
+  pcall->call_state = CLSTA_INQUEUE;
+  LM_ERR ("REFER failed!");
+  return;
+  }
+LM_INFO ("Referral reply=%d", pcbp->rpl->first_line.u.reply.statuscode);
 if (REPLY_CLASS (pcbp->rpl) == 2)
   { pcall->call_state = CLSTA_RFRWAIT; }
 else
@@ -1384,7 +1666,8 @@ for (npos1 = 0; npos1 < pbuf->len; npos1++)
 str pextrahdr [1] =
   {
   STR_STATIC_INIT (
-  "Contact: <sip:9001@10.211.64.12>" SIPEOL //???
+  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  "Supported: 100rel,replaces" SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
@@ -1395,17 +1678,16 @@ str pSDP [1] =
   {
   STR_STATIC_INIT (
   "v=0" SIPEOL
-  "o=- 1167618058 1167618058 IN IP4 1.1.1.1" SIPEOL
+  "o=- 1 1 IN IP4 1.1.1.1" SIPEOL
   "s=" USRAGNT SIPEOL
   "c=IN IP4 1.1.1.1" SIPEOL
   "t=0 0" SIPEOL
   "a=sendrecv" SIPEOL
-  "m=audio 2230 RTP/AVP 9 0 8 18 127" SIPEOL
+  "m=audio 1 RTP/AVP 9 0 8 18" SIPEOL
   "a=rtpmap:9 G722/8000" SIPEOL
   "a=rtpmap:0 PCMU/8000" SIPEOL
   "a=rtpmap:8 PCMA/8000" SIPEOL
   "a=rtpmap:18 G729/8000" SIPEOL
-  "a=rtpmap:127 telephone-event/8000" SIPEOL
   )
   };
 
@@ -1497,9 +1779,15 @@ pnewSDP->s = &pbuf->s [npos1 + 1];
 pnewSDP->len = pbuf->len - npos1 - 1;
 
 /**********
-* send adjusted reply
+* o save media port number
+* o send adjusted reply
 **********/
 
+char *pfnd = strstr (pnewSDP->s, "m=audio ");
+if (!pfnd)
+  { LM_ERR ("%sUnable to find audio port!", pfncname); } // should not happen
+else
+  { pcall->call_aport = strtol (pfnd + 8, NULL, 10); }
 if (!add_lump_rpl2 (pmsg, pextrahdr->s, pextrahdr->len, LUMP_RPL_HDR))
   {
   LM_ERR ("%sUnable to reply with new header", pfncname);

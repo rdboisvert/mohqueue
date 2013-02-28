@@ -55,10 +55,11 @@ typedef struct
 #define CLSTA_RINGING   102
 #define CLSTA_INVITED   103
 #define CLSTA_INQUEUE   200
-#define CLSTA_REFER     201
-#define CLSTA_RFRWAIT   202
-#define CLSTA_RFRDONE   203
-#define CLSTA_RFRFAIL   204
+#define CLSTA_REFER     301
+#define CLSTA_RFRWAIT   302
+#define CLSTA_HOLDSTRT  401
+#define CLSTA_HOLDFAIL  402
+#define CLSTA_HOLDOK    403
 #define CLSTA_ERR       900
 
 typedef struct
@@ -72,6 +73,7 @@ typedef struct
   char call_via [1024];
   int call_state;
   int call_cseq;
+  int call_aport;
   int mohq_id;
   unsigned int call_hash;
   unsigned int call_label;
