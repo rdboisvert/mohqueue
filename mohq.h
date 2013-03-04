@@ -55,11 +55,10 @@ typedef struct
 #define CLSTA_RINGING   102
 #define CLSTA_INVITED   103
 #define CLSTA_INQUEUE   200
-#define CLSTA_REFER     301
-#define CLSTA_RFRWAIT   302
-#define CLSTA_HOLDSTRT  401
-#define CLSTA_HOLDFAIL  402
-#define CLSTA_HOLDOK    403
+#define CLSTA_HLDSTRT   301
+#define CLSTA_REFER     302
+#define CLSTA_RFRWAIT   303
+#define CLSTA_NHLDSTRT  304
 #define CLSTA_ERR       900
 
 typedef struct
@@ -68,6 +67,7 @@ typedef struct
   int call_active;
   char call_id [101];
   char call_from [URI_LEN + 1];
+  char call_referto [URI_LEN + 1];
   char call_contact [URI_LEN + 1];
   char call_tag [101];
   char call_via [1024];

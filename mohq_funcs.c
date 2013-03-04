@@ -41,8 +41,6 @@
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
-str preferby [1] = {STR_STATIC_INIT ("Referred-By")};
-str presp_busy [1] = {STR_STATIC_INIT ("Busy here")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
@@ -72,7 +70,7 @@ char pinvitesdp [] =
 char prefermsg [] =
   {
   "Max-Forwards: 70" SIPEOL
-  "Refer-To: <%.*s>" SIPEOL
+  "Refer-To: <%s>" SIPEOL
   "Referred-By: <%.*s>" SIPEOL
   };
 
@@ -82,9 +80,11 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
+char *get_queue_uri (call_lst *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
-static void refer_invite_cb (struct cell *, int, struct tmcb_params *);
+int refer_call (call_lst *);
+static void refer_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
@@ -141,7 +141,7 @@ else
   else
     {
     if (ptm->t_release (pcall->call_pmsg) < 0)
-      { LM_ERR ("%srelease trans failed", pfncname); }
+      { LM_ERR ("%sRelease transaction failed!", pfncname); }
     }
   pcall->call_hash = pcall->call_label = 0;
   wait_db_flush (pconn, pcall);
@@ -201,13 +201,12 @@ return;
 * Change Hold
 *
 * INPUT:
-*   Arg (1) = queue index
-*   Arg (2) = call pointer
-*   Arg (3) = hold flag
+*   Arg (1) = call pointer
+*   Arg (2) = hold flag
 * OUTPUT: 0 if failed
 **********/
 
-int change_hold (int mohq_idx, call_lst *pcall, int bhold)
+int change_hold (call_lst *pcall, int bhold)
 
 {
 /**********
@@ -254,8 +253,9 @@ else
   ptarget->s = pcontact->uri.s;
   ptarget->len = pcontact->uri.len;
   }
+char *pquri = get_queue_uri (pcall);
 int npos1 = sizeof (pinvitemsg) // INVITE template
-  + strlen (pmod_data->pmohq_lst [mohq_idx].mohq_uri); // contact
+  + strlen (pquri); // contact
 dlg_t *pdlg = 0;
 char *psdp = 0;
 char *phdr = pkg_malloc (npos1);
@@ -264,7 +264,7 @@ if (!phdr)
   LM_ERR ("%sNo more memory!", pfncname);
   return 0;
   }
-sprintf (phdr, pinvitemsg, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
+sprintf (phdr, pinvitemsg, pquri);
 str phdrs [1];
 phdrs->s = phdr;
 phdrs->len = strlen (phdr);
@@ -275,13 +275,13 @@ phdrs->len = strlen (phdr);
 * o create buffer
 **********/
 
-int npos2 = 1; //???
+npos1 = 1;
 npos1 = sizeof (pinvitesdp) // INVITE template
   + 20 // session id + version
   + 30 // server IP address twice
   + 4  // send type
   + 5  // media port number
-  + (npos2 * 40); // media types
+  + (npos1 * 40); // media types
 psdp = pkg_malloc (npos1);
 if (!psdp)
   {
@@ -324,8 +324,8 @@ pdlg->id.rem_tag.s = ptob->tag_value.s;
 pdlg->id.rem_tag.len = ptob->tag_value.len;
 pdlg->rem_target.s = ptarget->s;
 pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = pmod_data->pmohq_lst [mohq_idx].mohq_uri;
-pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
+pdlg->loc_uri.s = pquri;
+pdlg->loc_uri.len = strlen (pquri);
 pdlg->rem_uri.s = ptob->uri.s;
 pdlg->rem_uri.len = ptob->uri.len;
 
@@ -335,25 +335,14 @@ pdlg->rem_uri.len = ptob->uri.len;
 
 uac_req_t puac [1];
 set_uac_req (puac, pinvite, phdrs, pbody, pdlg,
-   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, hold_cb, pcall);
-pcall->call_state = CLSTA_HOLDSTRT;
-if (ptm->t_request_within (puac) < 0)
-  { pcall->call_state = CLSTA_HOLDFAIL; }
+  TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, hold_cb, pcall);
+pcall->call_state = bhold ? CLSTA_HLDSTRT : CLSTA_NHLDSTRT;
+if (ptm->t_request_within (puac) >= 0)
+  { nret = 1; }
 
 /**********
-* wait for hold to complete
+* release memory
 **********/
-
-while (1)
-  {
-  usleep (USLEEP_LEN);
-  if (pcall->call_state != CLSTA_HOLDSTRT)
-    { break; }
-  }
-if (pcall->call_state == CLSTA_HOLDOK)
-  { nret = 1; }
-else
-  { LM_ERR ("%sSend hold failed!", pfncname); }
 
 hold_err:
 if (pdlg)
@@ -790,6 +779,27 @@ return;
 }
 
 /**********
+* Get Queue URI
+*
+* INPUT:
+*   Arg (1) = call pointer
+* OUTPUT: URI pointer
+**********/
+
+char *get_queue_uri (call_lst *pcall)
+
+{
+int mohq_id = pcall->mohq_id;
+int nidx;
+for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
+  {
+  if (mohq_id == pmod_data->pmohq_lst [nidx].mohq_id)
+    { return pmod_data->pmohq_lst [nidx].mohq_uri; }
+  }
+return "";
+}
+
+/**********
 * Hold Callback
 *
 * INPUT:
@@ -803,28 +813,51 @@ static void
   hold_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
 
 {
+char *pfncname = "hold_cb: ";
 call_lst *pcall = (call_lst *)*pcbp->param;
 switch (ntype)
   {
-  case TMCB_DESTROY:
-    LM_INFO ("hold callback DESTROY");//???
-    break;
   case TMCB_ON_FAILURE:
-    LM_INFO ("hold callback FAILURE");//???
-    pcall->call_state = CLSTA_HOLDFAIL;
+    /**********
+    * if hold off, return call to queue
+    **********/
+
+    LM_ERR ("%sHold failed!", pfncname);
+    if (pcall->call_state == CLSTA_NHLDSTRT)
+      {
+      pcall->call_state = CLSTA_INQUEUE;
+      return;
+      }
     break;
   case TMCB_LOCAL_COMPLETED:
-    LM_INFO ("hold callback COMPLETE, reply=%d",
-      pcbp->rpl->first_line.u.reply.statuscode);//???
-    if (pcbp->rpl->first_line.u.reply.statuscode == 200)
-      { pcall->call_state = CLSTA_HOLDOK; }
-    else
-      { pcall->call_state = CLSTA_HOLDFAIL; }
-    break;
-  default:
-    LM_INFO ("hold callback %d", ntype);//???
+    /**********
+    * if hold off, return call to queue
+    **********/
+
+LM_INFO ("hold callback COMPLETE, reply=%d", pcbp->rpl->first_line.u.reply.statuscode);//???
+    if (REPLY_CLASS (pcbp->rpl) != 2)
+      {
+      LM_ERR ("%sHold failed; status=%d!", pfncname,
+        pcbp->rpl->first_line.u.reply.statuscode);
+      if (pcall->call_state == CLSTA_NHLDSTRT)
+        {
+        pcall->call_state = CLSTA_INQUEUE;
+        return;
+        }
+      }
     break;
   }
+
+/**********
+* o send refer
+* o take call off hold
+**********/
+
+if (refer_call (pcall))
+  { return; }
+LM_ERR ("%sUnable to refer call!", pfncname);
+if (!change_hold (pcall, 0))
+  { pcall->call_state = CLSTA_INQUEUE; }
 return;
 }
 
@@ -958,6 +991,7 @@ LM_INFO ("%sdeleting call", pfncname);
   default:
     pcall->call_state = CLSTA_INQUEUE;
     LM_ERR ("%sUnable to redirect call", pfncname);
+    break;
   }
 return;
 }
@@ -1021,416 +1055,16 @@ return;
 }
 
 /**********
-* Referred Invite
+* Refer Call
 *
 * INPUT:
-*   Arg (1) = SIP message pointer
-* OUTPUT: none
+*   Arg (1) = call pointer
+* OUTPUT: 0 if failed
 **********/
 
-void refer_invite (sip_msg_t *pmsg)
+int refer_call (call_lst *pcall)
 
 {
-/**********
-* o INVITE?
-* o Referred-By that matches call?
-**********/
-
-char *pfncname = "refer_invite: ";
-if (pmsg->REQ_METHOD != METHOD_INVITE)
-  { return; }
-hdr_field_t *phfld;
-call_lst *pcall;
-int nrefer_idx;
-for (phfld = pmsg->headers; phfld; phfld = phfld->next)
-  {
-  /**********
-  * o find referred-by
-  * o find matching call
-  * o check state
-  * o catch replies
-  **********/
-
-  if (cmp_hdrname_str (&phfld->name, preferby))
-    { continue; }
-  nrefer_idx = find_referred_call (&phfld->body);
-  if (nrefer_idx == -1)
-    { continue; }
-  pcall = &pmod_data->pcall_lst [nrefer_idx];
-  if (pcall->call_state != CLSTA_RFRWAIT && pcall->call_state != CLSTA_REFER)
-    { continue; }
-  if (pmod_data->ptm->register_tmcb (pmsg, 0, TMCB_RESPONSE_IN,
-    refer_invite_cb, 0, 0) < 0)
-    { LM_ERR ("%sUnable to set callback!", pfncname); }
-  break;
-  }
-return;
-}
-
-/**********
-* Refer Invite Callback
-*
-* INPUT:
-*   Arg (1) = cell pointer
-*   Arg (2) = callback type
-*   Arg (3) = callback parms
-* OUTPUT: none
-**********/
-
-static void
-  refer_invite_cb (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
-
-{
-/**********
-* o error code?
-* o rewrite code to buffer
-* o deleted reason lump
-* o clone reason phrase
-* o insert new reason lump
-**********/
-
-char *pfncname = "refer_invite_cb: ";
-sip_msg_t *pmsg = pcbp->rpl;
-LM_INFO ("refer invite callback reply=%d", pmsg->first_line.u.reply.statuscode);//???
-if (REPLY_CLASS (pmsg) <= 2)
-  { return; }
-LM_INFO ("NEED TO CHANGE REPLY!");
-int ncode = 486;
-pmsg->first_line.u.reply.statuscode = ncode;
-pmsg->first_line.u.reply.status.s [2] = ncode % 10 + '0';
-ncode /= 10;
-pmsg->first_line.u.reply.status.s [1] = ncode % 10 + '0';
-ncode /= 10;
-pmsg->first_line.u.reply.status.s [0] = ncode + '0';
-struct lump *plump = del_lump (pmsg,
-  pmsg->first_line.u.reply.reason.s - pmsg->buf,
-  pmsg->first_line.u.reply.reason.len, 0);
-if (!plump)
-  {
-  LM_ERR ("%s: Unable to delete lump!", pfncname);
-  return;
-  }
-char *preason = (char *) pkg_malloc (presp_busy->len);
-if (!preason)
-  {
-  LM_ERR ("%sNo more memory!", pfncname);
-  return;
-  }
-memcpy (preason, presp_busy->s, presp_busy->len);
-if (!insert_new_lump_after (plump, preason, presp_busy->len, 0))
-  {
-  LM_ERR ("%s: Unable to add lump!", pfncname);
-  pkg_free (preason);
-  return;
-  }
-}
-
-/**********
-* Process reINVITE Message
-*
-* INPUT:
-*   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
-*   Arg (3) = tag string pointer
-* OUTPUT: none
-**********/
-
-void reinvite_msg (sip_msg_t *pmsg, int mohq_idx, str *tag_value)
-
-{
-/**********
-* 
-**********/
-
-return;
-}
-
-/**********
-* Form Char Array from STR
-*
-* INPUT:
-*   Arg (1) = str pointer
-* OUTPUT: char pointer; NULL if unable to allocate
-**********/
-
-char *form_tmpstr (str *pstr)
-
-{
-char *pcstr = malloc (pstr->len + 1);
-if (!pcstr)
-  {
-  LM_ERR ("No more memory!");
-  return NULL;
-  }
-memcpy (pcstr, pstr->s, pstr->len);
-pcstr [pstr->len] = 0;
-return pcstr;
-}
-
-/**********
-* Release Char Array
-*
-* INPUT:
-*   Arg (1) = char pointer
-* OUTPUT: none
-**********/
-
-void free_tmpstr (char *pcstr)
-
-{
-if (pcstr)
-  { free (pcstr); }
-return;
-}
-
-/**********
-* external functions
-**********/
-
-/**********
-* Count Messages
-*
-* INPUT:
-*   Arg (1) = SIP message pointer
-*   Arg (2) = queue name
-*   Arg (3) = pv result name
-* OUTPUT: -1 if no items in queue; else result = count
-**********/
-
-int mohq_count (sip_msg_t *pmsg, pv_elem_t *pqueue, char *presult)
-
-{
-/**********
-* get queue and pv names
-**********/
-
-char *pfncname = "mohq_count: ";
-str pavp [1], pqname [1];
-if (!pqueue || !presult)
-  {
-  LM_ERR ("%sParameters missing!", pfncname);
-  return -1;
-  }
-if (pv_printf_s (pmsg, pqueue, pqname))
-  {
-  LM_ERR ("%sUnable to extract queue name!", pfncname);
-  return -1;
-  }
-
-/**********
-* o pv provided?
-* o create pv if not exist
-**********/
-
-pavp->s = presult;
-pavp->len = strlen (presult);
-if (!pavp->len)
-  {
-  LM_ERR ("%sResult pv name missing!", pfncname);
-  return -1;
-  }
-pv_spec_t *pavp_spec = pv_cache_get (pavp);
-if (!pavp_spec)
-  {
-  LM_ERR ("%sUnable to create pv (%.*s)!", pfncname, STR_FMT (pavp));
-  return -1;
-  }
-
-/**********
-* o find queue
-* o count items in queue
-**********/
-
-int nq_idx = find_queue (pqname);
-int ncount = 0;
-call_lst *pcalls = pmod_data->pcall_lst;
-int ncall_idx, mohq_id;
-if (nq_idx != -1)
-  {
-  mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
-  for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
-    {
-    if (!pcalls [ncall_idx].call_active)
-      { continue; }
-    if (pcalls [ncall_idx].mohq_id == mohq_id
-      && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
-      { ncount++; }
-    }
-  }
-
-/**********
-* o set pv result
-* o exit with result
-**********/
-
-pv_value_t pavp_val [1];
-memset (pavp_val, 0, sizeof (pv_value_t));
-pavp_val->ri = ncount;
-pavp_val->flags = PV_TYPE_INT | PV_VAL_INT;
-if (pv_set_spec_value (0, pavp_spec, 0, pavp_val) < 0)
-  {
-  LM_ERR ("%sUnable to set pv value (%.*s)!", pfncname, STR_FMT (pavp));
-  return -1;
-  }
-return 1;
-}
-
-/**********
-* Process Message
-*
-* INPUT:
-*   Arg (1) = SIP message pointer
-* OUTPUT: -1=not directed to queue; 0=exit script
-**********/
-
-int mohq_process (sip_msg_t *pmsg)
-
-{
-/**********
-* o parse headers
-* o directed to message queue?
-* o connect to database
-**********/
-
-if (parse_headers (pmsg, HDR_EOH_F, 0) < 0)
-  {
-  LM_ERR ("Unable to parse header!");
-  return -1;
-  }
-to_body_t *pto_body = get_to (pmsg);
-char *tmpstr = form_tmpstr (&pto_body->uri);
-if (!tmpstr)
-  { return -1; }
-int mohq_idx = find_mohq_id (tmpstr);
-free_tmpstr (tmpstr);
-pconn = mohq_dbconnect ();
-if (mohq_idx < 0)
-  {
-  /**********
-  * check for referred call
-  **********/
-
-  refer_invite (pmsg);
-  if (pconn)
-    { mohq_dbdisconnect (pconn); }
-  return -1;
-  }
-if (pconn) //??? will never update if existing not there
-  { update_mohq_lst (pconn); }
-else
-  { LM_WARN ("Unable to connect to DB"); }
-
-/**********
-* process message
-**********/
-
-str smethod = REQ_LINE (pmsg).method;
-LM_INFO ("???%.*s: [%d]%s", STR_FMT (&smethod),
-  mohq_idx, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
-switch (pmsg->REQ_METHOD)
-  {
-  case METHOD_INVITE:
-    /**********
-    * initial INVITE?
-    **********/
-
-    if (!pto_body->tag_value.len)
-      { first_invite_msg (pmsg, mohq_idx); }
-    else
-      { reinvite_msg (pmsg, mohq_idx, &pto_body->tag_value); }
-    break;
-  case METHOD_NOTIFY:
-    notify_msg (pmsg, mohq_idx);
-    break;
-  case METHOD_PRACK:
-    prack_msg (pmsg, mohq_idx);
-    break;
-  case METHOD_ACK:
-    ack_msg (pmsg, mohq_idx);
-    break;
-  case METHOD_BYE:
-    bye_msg (pmsg, mohq_idx);
-    break;
-  }
-if (pconn)
-  { mohq_dbdisconnect (pconn); }
-return 0;
-}
-
-/**********
-* redirect message
-**********/
-
-/**********
-* Redirect Oldest Queued Call
-*
-* INPUT:
-*   Arg (1) = SIP message pointer
-*   Arg (2) = queue name
-*   Arg (3) = redirect URI
-* OUTPUT: -1 if no items in queue; else redirects oldest call
-**********/
-
-int mohq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
-
-{
-/**********
-* o get queue name and URI
-* o check URI
-**********/
-
-char *pfncname = "mohq_redirect: ";
-str puri [1], pqname [1];
-if (!pqueue || !pURI)
-  {
-  LM_ERR ("%sParameters missing!", pfncname);
-  return -1;
-  }
-if (pv_printf_s (pmsg, pqueue, pqname))
-  {
-  LM_ERR ("%sUnable to extract queue name!", pfncname);
-  return -1;
-  }
-if (pv_printf_s (pmsg, pURI, puri))
-  {
-  LM_ERR ("%sUnable to extract URI!", pfncname);
-  return -1;
-  }
-struct sip_uri puri_parsed [1];
-if (parse_uri (puri->s, puri->len, puri_parsed))
-  {
-  LM_ERR ("%sInvalid URI (%.*s)!", pfncname, STR_FMT (puri));
-  return -1;
-  }
-
-/**********
-* o find queue
-* o find oldest call
-**********/
-
-//??? need to lock queue while processing
-int nq_idx = find_queue (pqname);
-if (nq_idx == -1)
-  { return -1; }
-if (pmod_data->pmohq_lst [nq_idx].mohq_flag & 8)//???
-  { return 1; }
-pmod_data->pmohq_lst [nq_idx].mohq_flag |= 8;//???
-call_lst *pcall = 0;// avoids complaint from compiler about uninitialized
-int ncall_idx;
-for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
-  {
-  pcall = &pmod_data->pcall_lst [ncall_idx];
-  if (pcall->call_active)
-    { break; }
-//??? need to really find
-  }
-if (ncall_idx == pmod_data->call_cnt)
-  {
-  LM_ERR ("%sNo calls in queue (%.*s)", pfncname, STR_FMT (pqname));
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
-  return -1;
-  }
-
 /**********
 * form REFER message
 * o find URI/tag in from
@@ -1440,6 +1074,7 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
 * o create buffer
 **********/
 
+char *pfncname = "refer_call: ";
 struct to_body ptob [1];
 parse_to (pcall->call_from, &pcall->call_from [strlen (pcall->call_from) + 1],
   ptob);
@@ -1447,15 +1082,10 @@ if (ptob->error != PARSE_OK)
   {
   // should never happen
   LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   return -1;
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
-#if 0 //???
-puri->s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
-puri->len = strlen (puri->s);
-#endif
 struct to_body pcontact [1];
 str ptarget [1];
 if (!*pcall->call_contact)
@@ -1471,7 +1101,6 @@ else
     {
     // should never happen
     LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
     return -1;
     }
   if (pcontact->param_lst)
@@ -1479,6 +1108,9 @@ pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   ptarget->s = pcontact->uri.s;
   ptarget->len = pcontact->uri.len;
   }
+str puri [1];
+puri->s = pcall->call_referto;
+puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
   + puri->len // Refer-To
   + ptob->uri.len; // Referred-By
@@ -1499,11 +1131,10 @@ char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
   LM_ERR ("%sNo more memory!", pfncname);
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
   return -1;
   }
 sprintf (pbuf, prefermsg,
-  STR_FMT (puri), // Refer-To
+  puri->s, // Refer-To
   STR_FMT (&ptob->uri)); // Referred-By
 
 /**********
@@ -1527,7 +1158,7 @@ pdlg->id.rem_tag.s = ptob->tag_value.s;
 pdlg->id.rem_tag.len = ptob->tag_value.len;
 pdlg->rem_target.s = ptarget->s;
 pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = pmod_data->pmohq_lst [nq_idx].mohq_uri;
+pdlg->loc_uri.s = get_queue_uri (pcall);
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
 pdlg->rem_uri.s = ptob->uri.s;
 pdlg->rem_uri.len = ptob->uri.len;
@@ -1545,7 +1176,6 @@ phdrs->len = strlen (pbuf);
 set_uac_req (puac, prefer, phdrs, 0, pdlg,
   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, refer_cb, pcall);
 pcall->call_state = CLSTA_REFER;
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
 if (ptm->t_request_within (puac) < 0)
   {
   pcall->call_state = CLSTA_INQUEUE;
@@ -1555,7 +1185,6 @@ if (ptm->t_request_within (puac) < 0)
 LM_INFO ("%sSent REFER request!", pfncname);
 
 refererr:
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
 if (pdlg)
   { pkg_free (pdlg); }
 pkg_free (pbuf);
@@ -1588,6 +1217,26 @@ if (REPLY_CLASS (pcbp->rpl) == 2)
   { pcall->call_state = CLSTA_RFRWAIT; }
 else
   { pcall->call_state = CLSTA_INQUEUE; }
+return;
+}
+
+/**********
+* Process reINVITE Message
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue index
+*   Arg (3) = tag string pointer
+* OUTPUT: none
+**********/
+
+void reinvite_msg (sip_msg_t *pmsg, int mohq_idx, str *tag_value)
+
+{
+/**********
+* 
+**********/
+
 return;
 }
 
@@ -1933,4 +1582,306 @@ return 1;
 answer_done:
 pkg_free (pbuf->s);
 return 0;
+}
+
+/**********
+* Form Char Array from STR
+*
+* INPUT:
+*   Arg (1) = str pointer
+* OUTPUT: char pointer; NULL if unable to allocate
+**********/
+
+char *form_tmpstr (str *pstr)
+
+{
+char *pcstr = malloc (pstr->len + 1);
+if (!pcstr)
+  {
+  LM_ERR ("No more memory!");
+  return NULL;
+  }
+memcpy (pcstr, pstr->s, pstr->len);
+pcstr [pstr->len] = 0;
+return pcstr;
+}
+
+/**********
+* Release Char Array
+*
+* INPUT:
+*   Arg (1) = char pointer
+* OUTPUT: none
+**********/
+
+void free_tmpstr (char *pcstr)
+
+{
+if (pcstr)
+  { free (pcstr); }
+return;
+}
+
+/**********
+* external functions
+**********/
+
+/**********
+* Count Messages
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue name
+*   Arg (3) = pv result name
+* OUTPUT: -1 if no items in queue; else result = count
+**********/
+
+int mohq_count (sip_msg_t *pmsg, pv_elem_t *pqueue, char *presult)
+
+{
+/**********
+* get queue and pv names
+**********/
+
+char *pfncname = "mohq_count: ";
+str pavp [1], pqname [1];
+if (!pqueue || !presult)
+  {
+  LM_ERR ("%sParameters missing!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pqueue, pqname))
+  {
+  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  return -1;
+  }
+
+/**********
+* o pv provided?
+* o create pv if not exist
+**********/
+
+pavp->s = presult;
+pavp->len = strlen (presult);
+if (!pavp->len)
+  {
+  LM_ERR ("%sResult pv name missing!", pfncname);
+  return -1;
+  }
+pv_spec_t *pavp_spec = pv_cache_get (pavp);
+if (!pavp_spec)
+  {
+  LM_ERR ("%sUnable to create pv (%.*s)!", pfncname, STR_FMT (pavp));
+  return -1;
+  }
+
+/**********
+* o find queue
+* o count items in queue
+**********/
+
+int nq_idx = find_queue (pqname);
+int ncount = 0;
+call_lst *pcalls = pmod_data->pcall_lst;
+int ncall_idx, mohq_id;
+if (nq_idx != -1)
+  {
+  mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
+  for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
+    {
+    if (!pcalls [ncall_idx].call_active)
+      { continue; }
+    if (pcalls [ncall_idx].mohq_id == mohq_id
+      && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
+      { ncount++; }
+    }
+  }
+
+/**********
+* o set pv result
+* o exit with result
+**********/
+
+pv_value_t pavp_val [1];
+memset (pavp_val, 0, sizeof (pv_value_t));
+pavp_val->ri = ncount;
+pavp_val->flags = PV_TYPE_INT | PV_VAL_INT;
+if (pv_set_spec_value (0, pavp_spec, 0, pavp_val) < 0)
+  {
+  LM_ERR ("%sUnable to set pv value (%.*s)!", pfncname, STR_FMT (pavp));
+  return -1;
+  }
+return 1;
+}
+
+/**********
+* Process Message
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+* OUTPUT: -1=not directed to queue; 0=exit script
+**********/
+
+int mohq_process (sip_msg_t *pmsg)
+
+{
+/**********
+* o parse headers
+* o directed to message queue?
+* o connect to database
+**********/
+
+if (parse_headers (pmsg, HDR_EOH_F, 0) < 0)
+  {
+  LM_ERR ("Unable to parse header!");
+  return -1;
+  }
+to_body_t *pto_body = get_to (pmsg);
+char *tmpstr = form_tmpstr (&pto_body->uri);
+if (!tmpstr)
+  { return -1; }
+int mohq_idx = find_mohq_id (tmpstr);
+free_tmpstr (tmpstr);
+if (mohq_idx < 0)
+  { return -1; }
+pconn = mohq_dbconnect ();
+if (pconn) //??? will never update if existing not there
+  { update_mohq_lst (pconn); }
+else
+  { LM_WARN ("Unable to connect to DB"); }
+
+/**********
+* process message
+**********/
+
+str smethod = REQ_LINE (pmsg).method;
+LM_INFO ("???%.*s[%d]: [%d]%s", STR_FMT (&smethod), getpid (),
+  mohq_idx, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
+switch (pmsg->REQ_METHOD)
+  {
+  case METHOD_INVITE:
+    /**********
+    * initial INVITE?
+    **********/
+
+    if (!pto_body->tag_value.len)
+      { first_invite_msg (pmsg, mohq_idx); }
+    else
+      { reinvite_msg (pmsg, mohq_idx, &pto_body->tag_value); }
+    break;
+  case METHOD_NOTIFY:
+    notify_msg (pmsg, mohq_idx);
+    break;
+  case METHOD_PRACK:
+    prack_msg (pmsg, mohq_idx);
+    break;
+  case METHOD_ACK:
+    ack_msg (pmsg, mohq_idx);
+    break;
+  case METHOD_BYE:
+    bye_msg (pmsg, mohq_idx);
+    break;
+  }
+if (pconn)
+  { mohq_dbdisconnect (pconn); }
+return 0;
+}
+
+/**********
+* redirect message
+**********/
+
+/**********
+* Redirect Oldest Queued Call
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue name
+*   Arg (3) = redirect URI
+* OUTPUT: -1 if no items in queue; else redirects oldest call
+**********/
+
+int mohq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
+
+{
+/**********
+* o get queue name and URI
+* o check URI
+**********/
+
+char *pfncname = "mohq_redirect: ";
+str puri [1], pqname [1];
+if (!pqueue || !pURI)
+  {
+  LM_ERR ("%sParameters missing!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pqueue, pqname))
+  {
+  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pURI, puri))
+  {
+  LM_ERR ("%sUnable to extract URI!", pfncname);
+  return -1;
+  }
+if (puri->len > URI_LEN)
+  {
+  LM_ERR ("%sURI too long!", pfncname);
+  return -1;
+  }
+struct sip_uri puri_parsed [1];
+if (parse_uri (puri->s, puri->len, puri_parsed))
+  {
+  LM_ERR ("%sInvalid URI (%.*s)!", pfncname, STR_FMT (puri));
+  return -1;
+  }
+
+/**********
+* o find queue
+* o find oldest call
+**********/
+
+//??? need to lock queue while processing
+int nq_idx = find_queue (pqname);
+if (nq_idx == -1)
+  { return -1; }
+if (pmod_data->pmohq_lst [nq_idx].mohq_flag & 8)//???
+  { return 1; }
+pmod_data->pmohq_lst [nq_idx].mohq_flag |= 8;//???
+call_lst *pcall = 0;// avoids complaint from compiler about uninitialized
+int ncall_idx;
+for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
+  {
+  pcall = &pmod_data->pcall_lst [ncall_idx];
+  if (pcall->call_active)
+    { break; }
+//??? need to really find
+  }
+if (ncall_idx == pmod_data->call_cnt)
+  {
+  LM_ERR ("%sNo calls in queue (%.*s)", pfncname, STR_FMT (pqname));
+  return -1;
+  }
+
+/**********
+* o save refer-to URI
+* o put call on hold
+* o send refer
+* o take call off hold
+**********/
+
+strncpy (pcall->call_referto, puri->s, puri->len);
+pcall->call_referto [puri->len] = '\0';
+if (change_hold (pcall, 1))
+  { return -1; }
+pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
+LM_ERR ("%sUnable to put call on hold!", pfncname);
+if (refer_call (pcall))
+  { return -1; }
+LM_ERR ("%sUnable to refer call!", pfncname);
+if (!change_hold (pcall, 0))
+  { pcall->call_state = CLSTA_INQUEUE; }
+return -1;
 }
