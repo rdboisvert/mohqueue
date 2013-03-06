@@ -50,7 +50,7 @@ char pinvitemsg [] =
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
   "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
-  "Supported: 100rel,replaces" SIPEOL
+  "Supported: 100rel" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
@@ -337,7 +337,9 @@ uac_req_t puac [1];
 set_uac_req (puac, pinvite, phdrs, pbody, pdlg,
   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, hold_cb, pcall);
 pcall->call_state = bhold ? CLSTA_HLDSTRT : CLSTA_NHLDSTRT;
-if (ptm->t_request_within (puac) >= 0)
+if (ptm->t_request_within (puac) < 0)
+  { LM_ERR ("%sUnable to create HOLD request!", pfncname); }
+else
   { nret = 1; }
 
 /**********
@@ -839,11 +841,11 @@ LM_INFO ("hold callback COMPLETE, reply=%d", pcbp->rpl->first_line.u.reply.statu
       {
       LM_ERR ("%sHold failed; status=%d!", pfncname,
         pcbp->rpl->first_line.u.reply.statuscode);
-      if (pcall->call_state == CLSTA_NHLDSTRT)
-        {
-        pcall->call_state = CLSTA_INQUEUE;
-        return;
-        }
+      }
+    if (pcall->call_state == CLSTA_NHLDSTRT)
+      {
+      pcall->call_state = CLSTA_INQUEUE;
+      return;
       }
     break;
   }
@@ -989,8 +991,9 @@ LM_INFO ("%sdeleting call", pfncname);
     delete_call (pcall);
     break;
   default:
-    pcall->call_state = CLSTA_INQUEUE;
     LM_ERR ("%sUnable to redirect call", pfncname);
+    if (!change_hold (pcall, 0))
+      { pcall->call_state = CLSTA_INQUEUE; }
     break;
   }
 return;
@@ -1082,7 +1085,7 @@ if (ptob->error != PARSE_OK)
   {
   // should never happen
   LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
-  return -1;
+  return 0;
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
@@ -1101,7 +1104,7 @@ else
     {
     // should never happen
     LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
-    return -1;
+    return 0;
     }
   if (pcontact->param_lst)
     { free_to_params (pcontact); }
@@ -1131,7 +1134,7 @@ char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
   LM_ERR ("%sNo more memory!", pfncname);
-  return -1;
+  return 0;
   }
 sprintf (pbuf, prefermsg,
   puri->s, // Refer-To
@@ -1141,6 +1144,7 @@ sprintf (pbuf, prefermsg,
 * create dialog
 **********/
 
+int nret = 0;
 pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
 if (!pdlg)
   {
@@ -1183,12 +1187,13 @@ if (ptm->t_request_within (puac) < 0)
   goto refererr;
   }
 LM_INFO ("%sSent REFER request!", pfncname);
+nret = -1;
 
 refererr:
 if (pdlg)
   { pkg_free (pdlg); }
 pkg_free (pbuf);
-return 0;
+return nret;
 }
 
 /**********
@@ -1434,7 +1439,7 @@ str pextrahdr [1] =
   {
   STR_STATIC_INIT (
   "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
-  "Supported: 100rel,replaces" SIPEOL
+  "Supported: 100rel" SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
@@ -1855,7 +1860,7 @@ int ncall_idx;
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   {
   pcall = &pmod_data->pcall_lst [ncall_idx];
-  if (pcall->call_active)
+  if (pcall->call_active && pcall->call_state == CLSTA_INQUEUE)
     { break; }
 //??? need to really find
   }
