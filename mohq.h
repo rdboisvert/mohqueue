@@ -59,11 +59,11 @@ typedef struct
 #define CLSTA_REFER     302
 #define CLSTA_RFRWAIT   303
 #define CLSTA_NHLDSTRT  304
+#define CLSTA_BYE       305
 #define CLSTA_ERR       900
 
 typedef struct
   {
-  int call_dirty;
   int call_active;
   char call_id [101];
   char call_from [URI_LEN + 1];

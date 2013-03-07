@@ -191,12 +191,11 @@ return;
 * Add Call Record
 *
 * INPUT:
-*   Arg (1) = connection pointer
-*   Arg (2) = call index
+*   Arg (1) = call index
 * OUTPUT: none
 **********/
 
-void add_call_rec (db1_con_t *pconn, int ncall_idx)
+void add_call_rec (int ncall_idx)
 
 {
 /**********
@@ -205,6 +204,7 @@ void add_call_rec (db1_con_t *pconn, int ncall_idx)
 **********/
 
 char *pfncname = "add_call_rec: ";
+db1_con_t *pconn = mohq_dbconnect ();
 if (!pconn)
   { return; }
 db_func_t *pdb = pmod_data->pdb;
@@ -219,7 +219,7 @@ if (pdb->insert (pconn, prkeys, prvals, CALL_COLCNT) < 0)
   LM_WARN ("%sUnable to add new row to %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
-pcall->call_dirty = 0;
+mohq_dbdisconnect (pconn);
 return;
 }
 
@@ -227,12 +227,11 @@ return;
 * Delete Call Record
 *
 * INPUT:
-*   Arg (1) = connection pointer
-*   Arg (2) = call pointer
+*   Arg (1) = call pointer
 * OUTPUT: none
 **********/
 
-void delete_call_rec (db1_con_t *pconn, call_lst *pcall)
+void delete_call_rec (call_lst *pcall)
 
 {
 /**********
@@ -241,6 +240,7 @@ void delete_call_rec (db1_con_t *pconn, call_lst *pcall)
 **********/
 
 char *pfncname = "delete_call_rec: ";
+db1_con_t *pconn = mohq_dbconnect ();
 if (!pconn)
   { return; }
 db_func_t *pdb = pmod_data->pdb;
@@ -254,7 +254,7 @@ if (pdb->delete (pconn, prkeys, 0, prvals, 1) < 0)
   LM_WARN ("%sUnable to delete row from %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
-pcall->call_dirty = 0;
+mohq_dbdisconnect (pconn);
 return;
 }
 
@@ -294,12 +294,11 @@ return;
 * Update Call Record
 *
 * INPUT:
-*   Arg (1) = connection pointer
-*   Arg (2) = call pointer
+*   Arg (1) = call pointer
 * OUTPUT: none
 **********/
 
-void update_call_rec (db1_con_t *pconn, call_lst *pcall)
+void update_call_rec (call_lst *pcall)
 
 {
 /**********
@@ -308,6 +307,7 @@ void update_call_rec (db1_con_t *pconn, call_lst *pcall)
 **********/
 
 char *pfncname = "update_call_rec: ";
+db1_con_t *pconn = mohq_dbconnect ();
 if (!pconn)
   { return; }
 db_func_t *pdb = pmod_data->pdb;
@@ -325,7 +325,7 @@ if (pdb->update (pconn, pqkeys, 0, pqvals, pukeys, puvals, 1, CALL_COLCNT) < 0)
   LM_WARN ("%sUnable to update row in %s", pfncname,
     pmod_data->pcfg->db_qtable.s);
   }
-pcall->call_dirty = 0;
+mohq_dbdisconnect (pconn);
 return;
 }
 
@@ -481,31 +481,5 @@ for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   --pmod_data->mohq_cnt;
   --nidx;
   }
-return;
-}
-
-/**********
-* Wait Until DB Flushed
-*
-* INPUT:
-*   Arg (1) = connection pointer
-*   Arg (2) = call structure pointer
-* OUTPUT: none
-**********/
-
-void wait_db_flush (db1_con_t *pconn, call_lst *pcall)
-
-{
-/**********
-* o make sure data flushed to DB
-* o set dirty flag
-**********/
-
-if (pconn)
-  {
-  while (pcall->call_dirty)
-    { usleep (USLEEP_LEN); }
-  }
-pcall->call_dirty = 1;
 return;
 }

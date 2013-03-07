@@ -39,11 +39,19 @@
 **********/
 
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
+str pbye [1] = {STR_STATIC_INIT ("BYE")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
+
+char pbyemsg [] =
+  {
+  "Max-Forwards: 70" SIPEOL
+  "Contact: <%s>" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  };
 
 char pinvitemsg [] =
   {
@@ -88,12 +96,6 @@ static void refer_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
-
-/**********
-* local variables
-**********/
-
-db1_con_t *pconn;
 
 /**********
 * local functions
@@ -144,11 +146,42 @@ else
       { LM_ERR ("%sRelease transaction failed!", pfncname); }
     }
   pcall->call_hash = pcall->call_label = 0;
-  wait_db_flush (pconn, pcall);
   pcall->call_state = CLSTA_INQUEUE;
-  update_call_rec (pconn, pcall);
+  update_call_rec (pcall);
   pcall->call_cseq = 1;
   }
+return;
+}
+
+/**********
+* BYE Callback
+*
+* INPUT:
+*   Arg (1) = cell pointer
+*   Arg (2) = callback type
+*   Arg (3) = callback parms
+* OUTPUT: none
+**********/
+
+static void bye_cb
+  (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
+
+{
+/**********
+* o error means must have hung after REFER
+* o delete the call
+**********/
+
+call_lst *pcall = (call_lst *)*pcbp->param;
+if (ntype == TMCB_ON_FAILURE)
+  { LM_INFO ("Call did not respond to BYE"); }
+else
+  {
+LM_INFO ("BYE reply=%d", pcbp->rpl->first_line.u.reply.statuscode);//???
+  if (REPLY_CLASS (pcbp->rpl) != 2)
+    { LM_INFO ("Call error on BYE"); }
+  }
+delete_call (pcall);
 return;
 }
 
@@ -356,6 +389,144 @@ return nret;
 }
 
 /**********
+* Close the Call
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = call pointer
+* OUTPUT: none
+**********/
+
+void close_call (sip_msg_t *pmsg, call_lst *pcall)
+
+{
+/**********
+* destroy proxy connection
+**********/
+
+char *pfncname = "close_call: ";
+LM_INFO ("%sdestoying rtpproxy", pfncname);//???
+if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+  { LM_ERR ("%srtpproxy_destroy refused!", pfncname); }
+
+/**********
+* form BYE header
+* o find URI/tag in from
+* o find target from contact or from header
+* o calculate size
+* o create buffer
+**********/
+
+tm_api_t *ptm = pmod_data->ptm;
+dlg_t *pdlg = 0;
+char *phdr = 0;
+int bsent = 0;
+struct to_body ptob [1];
+parse_to (pcall->call_from, &pcall->call_from [strlen (pcall->call_from) + 1],
+  ptob);
+if (ptob->error != PARSE_OK)
+  {
+  // should never happen
+  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
+  goto bye_err;
+  }
+if (ptob->param_lst)
+  { free_to_params (ptob); }
+struct to_body pcontact [1];
+str ptarget [1];
+if (!*pcall->call_contact)
+  {
+  ptarget->s = ptob->uri.s;
+  ptarget->len = ptob->uri.len;
+  }
+else
+  {
+  parse_to (pcall->call_contact,
+    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
+  if (pcontact->error != PARSE_OK)
+    {
+    // should never happen
+    LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
+    goto bye_err;
+    }
+  if (pcontact->param_lst)
+    { free_to_params (pcontact); }
+  ptarget->s = pcontact->uri.s;
+  ptarget->len = pcontact->uri.len;
+  }
+char *pquri = get_queue_uri (pcall);
+int npos1 = sizeof (pbyemsg) // BYE template
+  + strlen (pquri); // contact
+phdr = pkg_malloc (npos1);
+if (!phdr)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  goto bye_err;
+  }
+sprintf (phdr, pbyemsg, pquri);
+str phdrs [1];
+phdrs->s = phdr;
+phdrs->len = strlen (phdr);
+
+/**********
+* create dialog
+**********/
+
+pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
+if (!pdlg)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  goto bye_err;
+  }
+memset (pdlg, 0, sizeof (dlg_t));
+pdlg->loc_seq.value = pcall->call_cseq++;
+pdlg->loc_seq.is_set = 1;
+pdlg->id.call_id.s = pcall->call_id;
+pdlg->id.call_id.len = strlen (pcall->call_id);
+pdlg->id.loc_tag.s = pcall->call_tag;
+pdlg->id.loc_tag.len = strlen (pcall->call_tag);
+pdlg->id.rem_tag.s = ptob->tag_value.s;
+pdlg->id.rem_tag.len = ptob->tag_value.len;
+pdlg->rem_target.s = ptarget->s;
+pdlg->rem_target.len = ptarget->len;
+pdlg->loc_uri.s = get_queue_uri (pcall);
+pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
+pdlg->rem_uri.s = ptob->uri.s;
+pdlg->rem_uri.len = ptob->uri.len;
+pdlg->state = DLG_CONFIRMED;
+
+/**********
+* send BYE request
+**********/
+
+uac_req_t puac [1];
+set_uac_req (puac, pbye, phdrs, 0, pdlg,
+  TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, bye_cb, pcall);
+pcall->call_state = CLSTA_BYE;
+if (ptm->t_request_within (puac) < 0)
+  {
+  LM_ERR ("%sUnable to create BYE request!", pfncname);
+  goto bye_err;
+  }
+LM_INFO ("%sSent BYE request!", pfncname);//???
+bsent = 1;
+
+/**********
+* o free memory
+* o delete call
+**********/
+
+bye_err:
+if (pdlg)
+  { pkg_free (pdlg); }
+if (phdr)
+  { pkg_free (phdr); }
+if (!bsent)
+  { delete_call (pcall); }
+return;
+}
+
+/**********
 * Create New Call Record
 *
 * INPUT:
@@ -478,7 +649,7 @@ for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
 * update DB
 **********/
 
-add_call_rec (pconn, ncall_idx);
+add_call_rec (ncall_idx);
 return ncall_idx;
 }
 
@@ -498,8 +669,7 @@ void delete_call (call_lst *pcall)
 * o inactivate slot
 **********/
 
-wait_db_flush (pconn, pcall);
-delete_call_rec (pconn, pcall);
+delete_call_rec (pcall);
 pcall->call_active = 0;
 return;
 }
@@ -764,9 +934,8 @@ else
     { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
   else
     {
-    wait_db_flush (pconn, pcall);
     pcall->call_state = CLSTA_RINGING;
-    update_call_rec (pconn, pcall);
+    update_call_rec (pcall);
     }
   }
 
@@ -979,16 +1148,7 @@ switch (pstart->u.reply.statuscode / 100)
   case 1:
     break;
   case 2:
-    /**********
-    * o delete MOH connection
-    * o delete call
-    **********/
-
-LM_INFO ("%sdestoying rtpproxy", pfncname);
-    if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
-      { LM_ERR ("%srtpproxy_destroy refused", pfncname); }
-LM_INFO ("%sdeleting call", pfncname);
-    delete_call (pcall);
+    close_call (pmsg, pcall);
     break;
   default:
     LM_ERR ("%sUnable to redirect call", pfncname);
@@ -1039,7 +1199,6 @@ if (pcall->call_state != CLSTA_PRACKSTRT)
 * accept PRACK
 **********/
 
-wait_db_flush (pconn, pcall);
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction", pfncname);
@@ -1053,7 +1212,7 @@ if (ptm->t_reply (pmsg, 200, "OK") < 0)
   return;
   }
 pcall->call_state = CLSTA_PRACKRPLY;
-update_call_rec (pconn, pcall);
+update_call_rec (pcall);
 return;
 }
 
@@ -1326,9 +1485,8 @@ if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
   LM_ERR ("%sUnable to reply to INVITE", pfncname);
   return 0;
   }
-wait_db_flush (pconn, pcall);
 pcall->call_state = CLSTA_PRACKSTRT;
-update_call_rec (pconn, pcall);
+update_call_rec (pcall);
 
 /**********
 * o wait until PRACK
@@ -1575,9 +1733,8 @@ if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
   LM_ERR ("%sUnable to reply to INVITE", pfncname);
   goto answer_done;
   }
-wait_db_flush (pconn, pcall);
 pcall->call_state = CLSTA_INVITED;
-update_call_rec (pconn, pcall);
+update_call_rec (pcall);
 return 1;
 
 /**********
@@ -1749,11 +1906,12 @@ int mohq_idx = find_mohq_id (tmpstr);
 free_tmpstr (tmpstr);
 if (mohq_idx < 0)
   { return -1; }
-pconn = mohq_dbconnect ();
-if (pconn) //??? will never update if existing not there
-  { update_mohq_lst (pconn); }
-else
-  { LM_WARN ("Unable to connect to DB"); }
+db1_con_t *pconn = mohq_dbconnect ();
+if (pconn)
+  {
+  update_mohq_lst (pconn);
+  mohq_dbdisconnect (pconn);
+  }
 
 /**********
 * process message
@@ -1787,8 +1945,6 @@ switch (pmsg->REQ_METHOD)
     bye_msg (pmsg, mohq_idx);
     break;
   }
-if (pconn)
-  { mohq_dbdisconnect (pconn); }
 return 0;
 }
 

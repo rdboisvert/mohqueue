@@ -55,12 +55,11 @@
 * DB function declarations
 **********/
 
-void add_call_rec (db1_con_t *, int);
-void delete_call_rec (db1_con_t *, call_lst *);
+void add_call_rec (int);
+void delete_call_rec (call_lst *);
 db1_con_t *mohq_dbconnect (void);
 void mohq_dbdisconnect (db1_con_t *);
-void update_call_rec (db1_con_t *, call_lst *);
+void update_call_rec (call_lst *);
 void update_mohq_lst (db1_con_t *pconn);
-void wait_db_flush (db1_con_t *, call_lst *);
 
 #endif /* MOHQ_DB_H */
