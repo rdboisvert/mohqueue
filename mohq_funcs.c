@@ -540,12 +540,17 @@ int create_call (int mohq_idx, sip_msg_t *pmsg, str *ptotag)
 
 {
 /**********
+* o lock calls
 * o find inactive slot
-* o get more memory if needed
 **********/
 
 char *pfncname = "create_call: ";
 int ncall_idx = pmod_data->call_cnt;
+if (!mohq_lock_set (pmod_data->pcall_lock, 1, 2000))
+  {
+  LM_ERR ("%sUnable to lock calls!", pfncname);
+  return -1;
+  }
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   {
   if (!pmod_data->pcall_lst [ncall_idx].call_active)
@@ -553,28 +558,18 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   }
 if (ncall_idx == pmod_data->call_cnt)
   {
-  if (!pmod_data->pcall_lst)
-    { pmod_data->pcall_lst = shm_malloc (sizeof (call_lst)); }
-  else
-    {
-    pmod_data->pcall_lst = shm_realloc (pmod_data->pcall_lst,
-      sizeof (call_lst) * (ncall_idx + 1));
-    }
-  if (!pmod_data->pcall_lst)
-    {
-    LM_ERR ("%sUnable to allocate shared memory!", pfncname);
-    pmod_data->call_cnt = 0;
-    return -1;
-    }
-  ncall_idx = pmod_data->call_cnt++;
+  LM_ERR ("%sNo call slots available!", pfncname);
+  return -1;
   }
 
 /**********
-* add values to new entry
+* o release call lock
+* o add values to new entry
 **********/
 
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 pcall->call_active = 1;
+mohq_lock_release (pmod_data->pcall_lock);
 pcall->mohq_id = pmod_data->pmohq_lst [mohq_idx].mohq_id;
 pcall->call_state = 0;
 str *pstr = &pmsg->callid->body;
@@ -646,10 +641,12 @@ for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
   }
 
 /**********
-* update DB
+* o update DB
+* o lock MOH queue
 **********/
 
 add_call_rec (ncall_idx);
+mohq_lock_set (pmod_data->pmohq_lock, 0, 0);
 return ncall_idx;
 }
 
@@ -667,10 +664,12 @@ void delete_call (call_lst *pcall)
 /**********
 * o update DB
 * o inactivate slot
+* o release MOH queue
 **********/
 
 delete_call_rec (pcall);
 pcall->call_active = 0;
+mohq_lock_release (pmod_data->pmohq_lock);
 return;
 }
 
@@ -685,8 +684,19 @@ return;
 int find_call (str *pcallid)
 
 {
+/**********
+* o lock calls
+* o find call
+**********/
+
 int nidx;
 str tmpstr;
+char *pfncname = "find_call: ";
+if (!mohq_lock_set (pmod_data->pcall_lock, 1, 2000))
+  {
+  LM_ERR ("%sUnable to lock calls!", pfncname);
+  return -1;
+  }
 for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   {
   if (!pmod_data->pcall_lst [nidx].call_active)
@@ -694,8 +704,12 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   tmpstr.s = pmod_data->pcall_lst [nidx].call_id;
   tmpstr.len = strlen (tmpstr.s);
   if (STR_EQ (tmpstr, *pcallid))
-    { return nidx; }
+    {
+    mohq_lock_release (pmod_data->pcall_lock);
+    return nidx;
+    }
   }
+mohq_lock_release (pmod_data->pcall_lock);
 return -1;
 }
 
@@ -1839,6 +1853,7 @@ if (!pavp_spec)
 
 /**********
 * o find queue
+* o lock calls
 * o count items in queue
 **********/
 
@@ -1846,6 +1861,11 @@ int nq_idx = find_queue (pqname);
 int ncount = 0;
 call_lst *pcalls = pmod_data->pcall_lst;
 int ncall_idx, mohq_id;
+if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
+  {
+  LM_ERR ("%sUnable to lock calls!", pfncname);
+  nq_idx = -1;
+  }
 if (nq_idx != -1)
   {
   mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
@@ -1857,6 +1877,7 @@ if (nq_idx != -1)
       && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
       { ncount++; }
     }
+  mohq_lock_release (pmod_data->pcall_lock);
   }
 
 /**********
@@ -1889,6 +1910,7 @@ int mohq_process (sip_msg_t *pmsg)
 {
 /**********
 * o parse headers
+* o lock MOH queue
 * o directed to message queue?
 * o connect to database
 **********/
@@ -1902,19 +1924,42 @@ to_body_t *pto_body = get_to (pmsg);
 char *tmpstr = form_tmpstr (&pto_body->uri);
 if (!tmpstr)
   { return -1; }
+if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 2000))
+  {
+  free_tmpstr (tmpstr);
+  return -1;
+  }
 int mohq_idx = find_mohq_id (tmpstr);
 free_tmpstr (tmpstr);
-if (mohq_idx < 0)
-  { return -1; }
 db1_con_t *pconn = mohq_dbconnect ();
 if (pconn)
   {
-  update_mohq_lst (pconn);
+  /**********
+  * o last update older than 1 minute?
+  * o exclusively lock MOH queue
+  * o update queue
+  **********/
+
+  if (pmod_data->mohq_update + 60 < time (0))
+    {
+    if (mohq_lock_change (pmod_data->pmohq_lock, 1))
+      {
+      update_mohq_lst (pconn);
+      mohq_lock_change (pmod_data->pmohq_lock, 0);
+      pmod_data->mohq_update = time (0);
+      }
+    }
   mohq_dbdisconnect (pconn);
+  }
+if (mohq_idx < 0)
+  {
+  mohq_lock_release (pmod_data->pmohq_lock);
+  return -1;
   }
 
 /**********
-* process message
+* o process message
+* o release MOH queue
 **********/
 
 str smethod = REQ_LINE (pmsg).method;
@@ -1945,6 +1990,7 @@ switch (pmsg->REQ_METHOD)
     bye_msg (pmsg, mohq_idx);
     break;
   }
+mohq_lock_release (pmod_data->pmohq_lock);
 return 0;
 }
 
@@ -2001,16 +2047,18 @@ if (parse_uri (puri->s, puri->len, puri_parsed))
 
 /**********
 * o find queue
+* o lock calls
 * o find oldest call
 **********/
 
-//??? need to lock queue while processing
 int nq_idx = find_queue (pqname);
 if (nq_idx == -1)
   { return -1; }
-if (pmod_data->pmohq_lst [nq_idx].mohq_flag & 8)//???
-  { return 1; }
-pmod_data->pmohq_lst [nq_idx].mohq_flag |= 8;//???
+if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
+  {
+  LM_ERR ("%sUnable to lock calls!", pfncname);
+  return -1;
+  }
 call_lst *pcall = 0;// avoids complaint from compiler about uninitialized
 int ncall_idx;
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
@@ -2023,6 +2071,7 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
 if (ncall_idx == pmod_data->call_cnt)
   {
   LM_ERR ("%sNo calls in queue (%.*s)", pfncname, STR_FMT (pqname));
+  mohq_lock_release (pmod_data->pcall_lock);
   return -1;
   }
 
@@ -2036,8 +2085,11 @@ if (ncall_idx == pmod_data->call_cnt)
 strncpy (pcall->call_referto, puri->s, puri->len);
 pcall->call_referto [puri->len] = '\0';
 if (change_hold (pcall, 1))
-  { return -1; }
-pmod_data->pmohq_lst [nq_idx].mohq_flag = 0;//???
+  {
+  mohq_lock_release (pmod_data->pcall_lock);
+  return -1;
+  }
+mohq_lock_release (pmod_data->pcall_lock);
 LM_ERR ("%sUnable to put call on hold!", pfncname);
 if (refer_call (pcall))
   { return -1; }

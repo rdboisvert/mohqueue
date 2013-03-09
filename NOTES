@@ -5,17 +5,15 @@ Use URI comparison routine when checking if URI matches.
 Use a locking mechanism to prevent overlap problems when dealing with
 messages.
 
-Why does RTPPROXY create rejected packets and yet still works.
-
 Keep track of call counts in queue records.
 
 Find out why URI wrong when build SIP msg from buffer.
-
-Need to use free_sip_msg ()?
 
 Accept-Language should be what is sent in INVITE.
 
 Need to handle BYE before final NOTIFY on REFER.
 
 Document /etc/shorewall/rules changes.
+ACCEPT  C:$SIP  all     udp     9000,9010:9099
 ACCEPT  fw      all     udp     -       9010:9099
+ACCEPT  all     fw      udp     9010:9099

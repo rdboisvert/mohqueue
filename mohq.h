@@ -24,6 +24,8 @@
 #ifndef MOHQ_H
 #define MOHQ_H
 
+#include "mohq_locks.h"
+
 /**********
 * definitions
 **********/
@@ -47,6 +49,7 @@ typedef struct
   char mohq_mohfile [101];
   int mohq_flag;
   int mohq_id;
+  mohq_lock pmohq_lock [1];
   } mohq_lst;
 
 /* call_state values */
@@ -91,10 +94,13 @@ typedef struct
 typedef struct
   {
   mod_cfg pcfg [1];
+  time_t mohq_update;
   int mohq_cnt;
   mohq_lst *pmohq_lst;
+  mohq_lock pmohq_lock [1];
   int call_cnt;
   call_lst *pcall_lst;
+  mohq_lock pcall_lock [1];
   db_func_t pdb [1];
   tm_api_t ptm [1];
   sl_api_t psl [1];

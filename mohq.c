@@ -63,16 +63,18 @@ static cmd_export_t mod_cmds [] = {
 };
 
 /* EXPORTED PARAMETERS */
-static char *mohdir = "";
-static char *db_url = DEFAULT_DB_URL;
-static char *db_ctable = "mohqcalls";
-static char *db_qtable = "mohqueues";
+char *db_url = DEFAULT_DB_URL;
+char *db_ctable = "mohqcalls";
+char *db_qtable = "mohqueues";
+char *mohdir = "";
+int moh_maxcalls = 50;
 
 static param_export_t mod_parms [] = {
-  { "mohdir", STR_PARAM, &mohdir },
   { "db_url", STR_PARAM, &db_url },
   { "db_ctable", STR_PARAM, &db_ctable },
   { "db_ctable", STR_PARAM, &db_qtable },
+  { "mohdir", STR_PARAM, &mohdir },
+  { "moh_maxcalls", INT_PARAM, &moh_maxcalls },
   { NULL, 0, NULL },
 };
 
@@ -176,6 +178,27 @@ if (!bfnd)
   LM_ERR ("mohdir is not a directory!");
   return 0;
   }
+
+/**********
+* max calls
+* o valid count?
+* o alloc memory
+**********/
+
+if (moh_maxcalls < 1 || moh_maxcalls > 5000)
+  {
+  LM_ERR ("moh_maxcalls not in range of 1-5000!");
+  return 0;
+  }
+pmod_data->pcall_lst =
+  (call_lst *) shm_malloc (sizeof (call_lst) * moh_maxcalls);
+if (!pmod_data->pcall_lst)
+  {
+  LM_ERR ("Unable to allocate shared memory");
+  return -1;
+  }
+memset (pmod_data->pcall_lst, 0, sizeof (call_lst) * moh_maxcalls);
+pmod_data->call_cnt = moh_maxcalls;
 return -1;
 }
 
@@ -282,12 +305,17 @@ void mod_destroy (void)
 
 {
 /**********
-* deallocate shared mem
+* o destroy MOH can call queue locks
+* o deallocate shared mem
 **********/
 
-LM_INFO ("???module destroy");
+LM_INFO ("???module destroy");//???
 if (!pmod_data)
   { return; }
+if (pmod_data->pmohq_lock->plock)
+  { mohq_lock_destroy (pmod_data->pmohq_lock); }
+if (pmod_data->pcall_lock->plock)
+  { mohq_lock_destroy (pmod_data->pcall_lock); }
 if (pmod_data->pmohq_lst)
   { shm_free (pmod_data->pmohq_lst); }
 if (pmod_data->pcall_lst)
@@ -368,7 +396,16 @@ if (!pmod_data->fn_rtp_destroy)
   LM_ERR ("Unable to load rtpproxy_destroy");
   goto initerr;
   }
-LM_INFO ("module initialized");
+
+/**********
+* init MOH and call queue locks
+**********/
+
+if (!mohq_lock_init (pmod_data->pmohq_lock))
+  { goto initerr; }
+if (!mohq_lock_init (pmod_data->pcall_lock))
+  { goto initerr; }
+LM_INFO ("module initialized");//???
 return 0;
 
 /**********
@@ -379,6 +416,8 @@ return 0;
 initerr:
 if (pmod_data->mohq_cnt)
   { shm_free (pmod_data->pmohq_lst); }
+if (pmod_data->pcall_lock->plock)
+  { mohq_lock_destroy (pmod_data->pcall_lock); }
 shm_free (pmod_data);
 pmod_data = NULL;
 return -1;
