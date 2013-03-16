@@ -53,10 +53,11 @@ typedef struct
   } mohq_lst;
 
 /* call_state values */
-#define CLSTA_PRACKSTRT 100
-#define CLSTA_PRACKRPLY 101
-#define CLSTA_RINGING   102
-#define CLSTA_INVITED   103
+#define CLSTA_ENTER     100
+#define CLSTA_PRACKSTRT 101
+#define CLSTA_PRACKRPLY 102
+#define CLSTA_RINGING   103
+#define CLSTA_INVITED   104
 #define CLSTA_INQUEUE   200
 #define CLSTA_HLDSTRT   301
 #define CLSTA_REFER     302
@@ -78,6 +79,7 @@ typedef struct
   int call_cseq;
   int call_aport;
   int mohq_id;
+  time_t call_time;
   unsigned int call_hash;
   unsigned int call_label;
   sip_msg_t *call_pmsg;

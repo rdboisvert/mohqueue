@@ -174,12 +174,12 @@ static void bye_cb
 
 call_lst *pcall = (call_lst *)*pcbp->param;
 if (ntype == TMCB_ON_FAILURE)
-  { LM_INFO ("Call did not respond to BYE"); }
+  { LM_ERR ("Call did not respond to BYE"); }
 else
   {
 LM_INFO ("BYE reply=%d", pcbp->rpl->first_line.u.reply.statuscode);//???
   if (REPLY_CLASS (pcbp->rpl) != 2)
-    { LM_INFO ("Call error on BYE"); }
+    { LM_ERR ("Call error on BYE"); }
   }
 delete_call (pcall);
 return;
@@ -405,7 +405,7 @@ void close_call (sip_msg_t *pmsg, call_lst *pcall)
 **********/
 
 char *pfncname = "close_call: ";
-LM_INFO ("%sdestoying rtpproxy", pfncname);//???
+LM_INFO ("%s(%s)destoying rtpproxy", pfncname, pcall->call_from);//???
 if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
   { LM_ERR ("%srtpproxy_destroy refused!", pfncname); }
 
@@ -645,8 +645,10 @@ for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
 * o lock MOH queue
 **********/
 
+pcall->call_state = CLSTA_ENTER;
 add_call_rec (ncall_idx);
 mohq_lock_set (pmod_data->pmohq_lock, 0, 0);
+LM_INFO ("%s(%s)Received INVITE", pfncname, pcall->call_from);//???
 return ncall_idx;
 }
 
@@ -667,6 +669,7 @@ void delete_call (call_lst *pcall)
 * o release MOH queue
 **********/
 
+LM_INFO ("(%s)Deleting call", pcall->call_from);//???
 delete_call_rec (pcall);
 pcall->call_active = 0;
 mohq_lock_release (pmod_data->pmohq_lock);
@@ -947,10 +950,7 @@ else
   if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
     { LM_ERR ("%sUnable to reply to INVITE", pfncname); }
   else
-    {
-    pcall->call_state = CLSTA_RINGING;
-    update_call_rec (pcall);
-    }
+    { pcall->call_state = CLSTA_RINGING; }
   }
 
 /**********
@@ -1011,6 +1011,7 @@ switch (ntype)
     if (pcall->call_state == CLSTA_NHLDSTRT)
       {
       pcall->call_state = CLSTA_INQUEUE;
+      update_call_rec (pcall);
       return;
       }
     break;
@@ -1028,6 +1029,7 @@ LM_INFO ("hold callback COMPLETE, reply=%d", pcbp->rpl->first_line.u.reply.statu
     if (pcall->call_state == CLSTA_NHLDSTRT)
       {
       pcall->call_state = CLSTA_INQUEUE;
+      update_call_rec (pcall);
       return;
       }
     break;
@@ -1042,7 +1044,10 @@ if (refer_call (pcall))
   { return; }
 LM_ERR ("%sUnable to refer call!", pfncname);
 if (!change_hold (pcall, 0))
-  { pcall->call_state = CLSTA_INQUEUE; }
+  {
+  pcall->call_state = CLSTA_INQUEUE;
+  update_call_rec (pcall);
+  }
 return;
 }
 
@@ -1167,7 +1172,10 @@ switch (pstart->u.reply.statuscode / 100)
   default:
     LM_ERR ("%sUnable to redirect call", pfncname);
     if (!change_hold (pcall, 0))
-      { pcall->call_state = CLSTA_INQUEUE; }
+      {
+      pcall->call_state = CLSTA_INQUEUE;
+      update_call_rec (pcall);
+      }
     break;
   }
 return;
@@ -1226,7 +1234,6 @@ if (ptm->t_reply (pmsg, 200, "OK") < 0)
   return;
   }
 pcall->call_state = CLSTA_PRACKRPLY;
-update_call_rec (pcall);
 return;
 }
 
@@ -1353,13 +1360,15 @@ phdrs->len = strlen (pbuf);
 set_uac_req (puac, prefer, phdrs, 0, pdlg,
   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, refer_cb, pcall);
 pcall->call_state = CLSTA_REFER;
+update_call_rec (pcall);
 if (ptm->t_request_within (puac) < 0)
   {
   pcall->call_state = CLSTA_INQUEUE;
   LM_ERR ("%sUnable to create REFER request!", pfncname);
+  update_call_rec (pcall);
   goto refererr;
   }
-LM_INFO ("%sSent REFER request!", pfncname);
+LM_INFO ("%s(%s)Sent REFER request!", pfncname, pcall->call_from);//???
 nret = -1;
 
 refererr:
@@ -1388,13 +1397,17 @@ if (ntype == TMCB_ON_FAILURE)
   {
   pcall->call_state = CLSTA_INQUEUE;
   LM_ERR ("REFER failed!");
+  update_call_rec (pcall);
   return;
   }
 LM_INFO ("Referral reply=%d", pcbp->rpl->first_line.u.reply.statuscode);
 if (REPLY_CLASS (pcbp->rpl) == 2)
   { pcall->call_state = CLSTA_RFRWAIT; }
 else
-  { pcall->call_state = CLSTA_INQUEUE; }
+  {
+  pcall->call_state = CLSTA_INQUEUE;
+  update_call_rec (pcall);
+  }
 return;
 }
 
@@ -1500,7 +1513,6 @@ if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
   return 0;
   }
 pcall->call_state = CLSTA_PRACKSTRT;
-update_call_rec (pcall);
 
 /**********
 * o wait until PRACK
@@ -1748,7 +1760,6 @@ if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
   goto answer_done;
   }
 pcall->call_state = CLSTA_INVITED;
-update_call_rec (pcall);
 return 1;
 
 /**********
@@ -2061,19 +2072,28 @@ if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
   }
 call_lst *pcall = 0;// avoids complaint from compiler about uninitialized
 int ncall_idx;
+time_t ntime = 0;
+int nfound = -1;
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   {
   pcall = &pmod_data->pcall_lst [ncall_idx];
-  if (pcall->call_active && pcall->call_state == CLSTA_INQUEUE)
-    { break; }
-//??? need to really find
+  if (!pcall->call_active || pcall->call_state != CLSTA_INQUEUE)
+    { continue; }
+  if (!ntime)
+    { nfound = ncall_idx; }
+  else
+    {
+    if (pcall->call_time < ntime)
+      { nfound = ncall_idx; }
+    }
   }
-if (ncall_idx == pmod_data->call_cnt)
+if (nfound == -1)
   {
-  LM_ERR ("%sNo calls in queue (%.*s)", pfncname, STR_FMT (pqname));
+  LM_WARN ("%sNo calls in queue (%.*s)", pfncname, STR_FMT (pqname));
   mohq_lock_release (pmod_data->pcall_lock);
   return -1;
   }
+pcall = &pmod_data->pcall_lst [nfound];
 
 /**********
 * o save refer-to URI
@@ -2095,6 +2115,9 @@ if (refer_call (pcall))
   { return -1; }
 LM_ERR ("%sUnable to refer call!", pfncname);
 if (!change_hold (pcall, 0))
-  { pcall->call_state = CLSTA_INQUEUE; }
+  {
+  pcall->call_state = CLSTA_INQUEUE;
+  update_call_rec (pcall);
+  }
 return -1;
 }

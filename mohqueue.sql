@@ -12,13 +12,11 @@ INSERT INTO version (table_name, table_version) values ('mohqcalls','1');
 CREATE TABLE mohqcalls (
   id SERIAL PRIMARY KEY NOT NULL,
   mohq_id INTEGER NOT NULL,
-  call_state INTEGER NOT NULL,
   call_id VARCHAR(100) NOT NULL,
+  call_status INTEGER NOT NULL,
   call_from VARCHAR(100) NOT NULL,
-  call_contact VARCHAR(100) NOT NULL,
-  call_via VARCHAR(1024) NOT NULL,
-  call_tag VARCHAR(100) NOT NULL,
-  mohq_time date NOT NULL,
+  call_contact VARCHAR(100),
+  call_time date NOT NULL,
   CONSTRAINT mohqcalls_idx UNIQUE (call_id)
 );
 

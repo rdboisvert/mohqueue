@@ -237,6 +237,7 @@ if (!pconn)
 
 /**********
 * o check schema
+* o remove all call recs
 * o load queue list
 **********/
 
@@ -254,6 +255,7 @@ if (db_check_table_version (pdb, pconn,
     pmod_data->pcfg->db_qtable.s, pdb_url->s, MOHQ_QTABLE_VERSION);
   goto dberr;
   }
+clear_calls (pconn);
 update_mohq_lst (pconn);
 mohq_dbdisconnect (pconn);
 return -1;

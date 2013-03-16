@@ -41,21 +41,20 @@
 #define MOHQCOL_NAME  4
 
 /* mohqcalls columns */
-#define CALL_COLCNT   8
-#define CALLCOL_MOHQ  0
-#define CALLCOL_FROM  1
-#define CALLCOL_CALL  2
-#define CALLCOL_CNTCT 3
-#define CALLCOL_VIA   4
-#define CALLCOL_TAG   5
-#define CALLCOL_STATE 6
-#define CALLCOL_TIME  7
+#define CALL_COLCNT   6
+#define CALLCOL_STATE 0
+#define CALLCOL_CALL  1
+#define CALLCOL_MOHQ  2
+#define CALLCOL_FROM  3
+#define CALLCOL_CNTCT 4
+#define CALLCOL_TIME  5
 
 /**********
 * DB function declarations
 **********/
 
 void add_call_rec (int);
+void clear_calls (db1_con_t *);
 void delete_call_rec (call_lst *);
 db1_con_t *mohq_dbconnect (void);
 void mohq_dbdisconnect (db1_con_t *);
