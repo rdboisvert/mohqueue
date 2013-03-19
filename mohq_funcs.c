@@ -88,7 +88,6 @@ char prefermsg [] =
 
 void delete_call (call_lst *);
 int find_call (str *);
-char *get_queue_uri (call_lst *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
 int refer_call (call_lst *);
@@ -286,7 +285,7 @@ else
   ptarget->s = pcontact->uri.s;
   ptarget->len = pcontact->uri.len;
   }
-char *pquri = get_queue_uri (pcall);
+char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (pinvitemsg) // INVITE template
   + strlen (pquri); // contact
 dlg_t *pdlg = 0;
@@ -454,7 +453,7 @@ else
   ptarget->s = pcontact->uri.s;
   ptarget->len = pcontact->uri.len;
   }
-char *pquri = get_queue_uri (pcall);
+char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (pbyemsg) // BYE template
   + strlen (pquri); // contact
 phdr = pkg_malloc (npos1);
@@ -489,7 +488,7 @@ pdlg->id.rem_tag.s = ptob->tag_value.s;
 pdlg->id.rem_tag.len = ptob->tag_value.len;
 pdlg->rem_target.s = ptarget->s;
 pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = get_queue_uri (pcall);
+pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
 pdlg->rem_uri.s = ptob->uri.s;
 pdlg->rem_uri.len = ptob->uri.len;
@@ -558,6 +557,7 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   }
 if (ncall_idx == pmod_data->call_cnt)
   {
+  mohq_lock_release (pmod_data->pcall_lock);
   LM_ERR ("%sNo call slots available!", pfncname);
   return -1;
   }
@@ -570,7 +570,7 @@ if (ncall_idx == pmod_data->call_cnt)
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 pcall->call_active = 1;
 mohq_lock_release (pmod_data->pcall_lock);
-pcall->mohq_id = pmod_data->pmohq_lst [mohq_idx].mohq_id;
+pcall->pmohq = &pmod_data->pmohq_lst [mohq_idx];
 pcall->call_state = 0;
 str *pstr = &pmsg->callid->body;
 strncpy (pcall->call_id, pstr->s, pstr->len);
@@ -964,27 +964,6 @@ return;
 }
 
 /**********
-* Get Queue URI
-*
-* INPUT:
-*   Arg (1) = call pointer
-* OUTPUT: URI pointer
-**********/
-
-char *get_queue_uri (call_lst *pcall)
-
-{
-int mohq_id = pcall->mohq_id;
-int nidx;
-for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
-  {
-  if (mohq_id == pmod_data->pmohq_lst [nidx].mohq_id)
-    { return pmod_data->pmohq_lst [nidx].mohq_uri; }
-  }
-return "";
-}
-
-/**********
 * Hold Callback
 *
 * INPUT:
@@ -1342,7 +1321,7 @@ pdlg->id.rem_tag.s = ptob->tag_value.s;
 pdlg->id.rem_tag.len = ptob->tag_value.len;
 pdlg->rem_target.s = ptarget->s;
 pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = get_queue_uri (pcall);
+pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
 pdlg->rem_uri.s = ptob->uri.s;
 pdlg->rem_uri.len = ptob->uri.len;
@@ -1873,20 +1852,20 @@ int ncount = 0;
 call_lst *pcalls = pmod_data->pcall_lst;
 int ncall_idx, mohq_id;
 if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
+  { LM_ERR ("%sUnable to lock calls!", pfncname); }
+else
   {
-  LM_ERR ("%sUnable to lock calls!", pfncname);
-  nq_idx = -1;
-  }
-if (nq_idx != -1)
-  {
-  mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
-  for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
+  if (nq_idx != -1)
     {
-    if (!pcalls [ncall_idx].call_active)
-      { continue; }
-    if (pcalls [ncall_idx].mohq_id == mohq_id
-      && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
-      { ncount++; }
+    mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
+    for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
+      {
+      if (!pcalls [ncall_idx].call_active)
+        { continue; }
+      if (pcalls [ncall_idx].pmohq->mohq_id == mohq_id
+        && pcalls [ncall_idx].call_state == CLSTA_INQUEUE)
+        { ncount++; }
+      }
     }
   mohq_lock_release (pmod_data->pcall_lock);
   }

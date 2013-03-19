@@ -1,8 +1,8 @@
 Need to handle situation when call terminates when REFER in process.
 
-Find available MOH files and offer these only.
+Need to use via when building messages.
 
-Before accepting MOH Queue 1) check URI of MOH queues, 2) mohdir.
+Find available MOH files and offer these only.
 
 Use URI comparison routine when checking if URI matches.
 

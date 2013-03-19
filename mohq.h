@@ -80,7 +80,7 @@ typedef struct
   int call_state;
   int call_cseq;
   int call_aport;
-  int mohq_id;
+  mohq_lst *pmohq;
   time_t call_time;
   unsigned int call_hash;
   unsigned int call_label;

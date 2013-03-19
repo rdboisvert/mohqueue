@@ -261,6 +261,7 @@ if (db_check_table_version (pdb, pconn,
   }
 clear_calls (pconn);
 update_mohq_lst (pconn);
+pmod_data->mohq_update = time (0);
 mohq_dbdisconnect (pconn);
 return -1;
 

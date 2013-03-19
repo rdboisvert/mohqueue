@@ -115,8 +115,8 @@ int nstate = pcall->call_state / 100;
 set_call_val (prvals, CALLCOL_STATE, CALLCOL_STATE, &nstate);
 if (!ncnt)
   { return; }
-set_call_val (prvals, CALLCOL_MOHQ, CALLCOL_MOHQ, &pcall->mohq_id);
-set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, &pcall->call_id);
+set_call_val (prvals, CALLCOL_MOHQ, CALLCOL_MOHQ, &pcall->pmohq->mohq_id);
+set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
 set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
 set_call_val (prvals, CALLCOL_CNTCT, CALLCOL_CNTCT, pcall->call_contact);
 set_call_val (prvals, CALLCOL_TIME, CALLCOL_TIME, &pcall->call_time);
@@ -441,7 +441,7 @@ for (nidx = 0; nidx < nrows; nidx++)
         }
       else
         {
-        if ((psb->st_mode & S_IFMT) == S_IFDIR)
+        if ((psb->st_mode & S_IFMT) != S_IFDIR)
           {
           LM_ERR ("Queue %s, Field %.*s: %s is not a directory!", pqname,
             STR_FMT (&MOHQCSTR_MDIR), pmohdir);
@@ -549,10 +549,10 @@ for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   if (0) /* ??? need to check */
     {
     LM_WARN ("Unable to remove queue (%s) because has active calls!",
-      pqlst [nidx].mohq_uri);
+      pqlst [nidx].mohq_name);
     continue;
     }
-  LM_INFO ("Removed queue (%s)", pqlst [nidx].mohq_uri);
+  LM_INFO ("Removed queue (%s)", pqlst [nidx].mohq_name);
   if (nidx != (pmod_data->mohq_cnt - 1))
     {
     memcpy (&pqlst [nidx], &pqlst [pmod_data->mohq_cnt - 1],
