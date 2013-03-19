@@ -30,8 +30,10 @@
 * definitions
 **********/
 
-#define URI_LEN 100
-#define USLEEP_LEN  100
+#define URI_LEN     100
+#define USLEEP_LEN  10
+#define MOHDIRLEN   100
+#define MOHFILELEN  100
 
 /**********
 * structures
@@ -45,8 +47,8 @@ typedef struct
   {
   char mohq_name [26];
   char mohq_uri [URI_LEN + 1];
-  char mohq_mohdir [101];
-  char mohq_mohfile [101];
+  char mohq_mohdir [MOHDIRLEN + 1];
+  char mohq_mohfile [MOHFILELEN + 1];
   int mohq_flag;
   int mohq_id;
   mohq_lock pmohq_lock [1];
@@ -87,7 +89,7 @@ typedef struct
 
 typedef struct
   {
-  str mohdir;
+  char *mohdir;
   str db_url;
   str db_ctable;
   str db_qtable;

@@ -164,8 +164,12 @@ if (!*mohdir)
   LM_ERR ("mohdir parameter not set!");
   return 0;
   }
-pmod_data->pcfg->mohdir.s = mohdir;
-pmod_data->pcfg->mohdir.len = strlen (mohdir);
+if (strlen (mohdir) > MOHDIRLEN)
+  {
+  LM_ERR ("mohdir too long!");
+  return 0;
+  }
+pmod_data->pcfg->mohdir = mohdir;
 int bfnd = 0;
 struct stat psb [1];
 if (!lstat (mohdir, psb))

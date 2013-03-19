@@ -21,6 +21,8 @@
  *
  */
 
+#include <sys/stat.h>
+
 #include "mohq_common.h"
 #include "mohq.h"
 #include "mohq_db.h"
@@ -369,6 +371,7 @@ void update_mohq_lst (db1_con_t *pconn)
 * o read queues from table
 **********/
 
+char *pfncname = "update_mohq_lst: ";
 if (!pconn)
   { return; }
 db_func_t *pdb = pmod_data->pdb;
@@ -383,7 +386,7 @@ for (nidx = 0; nidx < MOHQ_COLCNT; nidx++)
 db1_res_t *presult = NULL;
 if (pdb->query (pconn, 0, 0, 0, prkeys, 0, MOHQ_COLCNT, 0, &presult))
   {
-  LM_ERR ("update_mohq_lst: table query (%s) failed",
+  LM_ERR ("%stable query (%s) failed!", pfncname,
     pmod_data->pcfg->db_qtable.s);
   return;
   }
@@ -395,11 +398,63 @@ mohq_lst *pnewlst;
 for (nidx = 0; nidx < nrows; nidx++)
   {
   /**********
-  * find matching queues
+  * check URI
   **********/
 
   prowvals = ROW_VALUES (prows + nidx);
+  char *pqname = VAL_STRING (prowvals + MOHQCOL_NAME);
   puri = VAL_STRING (prowvals + MOHQCOL_URI);
+  struct sip_uri puri_parsed [1];
+  if (parse_uri (puri, strlen (puri), puri_parsed))
+    {
+    LM_ERR ("Queue %s, Field %.*s: %s is not a valid URI!", pqname,
+      STR_FMT (&MOHQCSTR_URI), puri);
+    continue;
+    }
+
+  /**********
+  * check MOHDIR
+  **********/
+
+  char *pmohdir;
+  if (VAL_NULL (prowvals + MOHQCOL_MDIR))
+    { pmohdir = pmod_data->pcfg->mohdir; }
+  else
+    {
+    pmohdir = VAL_STRING (prowvals + MOHQCOL_MDIR);
+    if (!*pmohdir)
+      { pmohdir = pmod_data->pcfg->mohdir; }
+    else
+      {
+      /**********
+      * mohdir
+      * o exists?
+      * o directory?
+      **********/
+
+      struct stat psb [1];
+      if (lstat (pmohdir, psb))
+        {
+        LM_ERR ("Queue %s, Field %.*s: Unable to find %s!", pqname,
+          STR_FMT (&MOHQCSTR_MDIR), pmohdir);
+        continue;
+        }
+      else
+        {
+        if ((psb->st_mode & S_IFMT) == S_IFDIR)
+          {
+          LM_ERR ("Queue %s, Field %.*s: %s is not a directory!", pqname,
+            STR_FMT (&MOHQCSTR_MDIR), pmohdir);
+          continue;
+          }
+        }
+      }
+    }
+
+  /**********
+  * find matching queues
+  **********/
+
   int bfnd = 0;
   int nidx2;
   for (nidx2 = 0; nidx2 < pmod_data->mohq_cnt; nidx2++)
@@ -411,23 +466,25 @@ for (nidx = 0; nidx < nrows; nidx++)
       * o mark as found
       **********/
 
-      ptext = VAL_STRING (prowvals + MOHQCOL_MDIR);
-      if (strcmp (pqlst [nidx2].mohq_mohdir, ptext))
+      if (strcmp (pqlst [nidx2].mohq_mohdir, pmohdir))
         {
-        strcpy (pqlst [nidx2].mohq_mohdir, ptext);
-        LM_INFO ("Changed mohdir for queue (%s)", puri);
+        strcpy (pqlst [nidx2].mohq_mohdir, pmohdir);
+        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+          STR_FMT (&MOHQCSTR_MDIR));
         }
       ptext = VAL_STRING (prowvals + MOHQCOL_MFILE);
       if (strcmp (pqlst [nidx2].mohq_mohfile, ptext))
         {
         strcpy (pqlst [nidx2].mohq_mohfile, ptext);
-        LM_INFO ("Changed mohfile for queue (%s)", puri);
+        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+          STR_FMT (&MOHQCSTR_MFILE));
         }
       ptext = VAL_STRING (prowvals + MOHQCOL_NAME);
       if (strcmp (pqlst [nidx2].mohq_name, ptext))
         {
         strcpy (pqlst [nidx2].mohq_name, ptext);
-        LM_INFO ("Changed name for queue (%s)", puri);
+        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+          STR_FMT (&MOHQCSTR_NAME));
         }
       bfnd = -1;
       pqlst [nidx2].mohq_flag |= MOHQF_CHK;
@@ -453,7 +510,7 @@ for (nidx = 0; nidx < nrows; nidx++)
     pnewlst = (mohq_lst *) shm_malloc (sizeof (mohq_lst) * nsize);
     if (!pnewlst)
       {
-      LM_ERR ("Unable to allocate shared memory");
+      LM_ERR ("%sUnable to allocate shared memory!", pfncname);
       return;
       }
     pmod_data->mohq_cnt = nsize;
@@ -462,13 +519,12 @@ for (nidx = 0; nidx < nrows; nidx++)
     pnewlst [nsize].mohq_id = prowvals [MOHQCOL_ID].val.int_val;
     pnewlst [nsize].mohq_flag = MOHQF_CHK;
     strcpy (pnewlst [nsize].mohq_uri, puri);
-    strcpy (pnewlst [nsize].mohq_mohdir,
-      VAL_STRING (prowvals + MOHQCOL_MDIR));
+    strcpy (pnewlst [nsize].mohq_mohdir, pmohdir);
     strcpy (pnewlst [nsize].mohq_mohfile,
       VAL_STRING (prowvals + MOHQCOL_MFILE));
     strcpy (pnewlst [nsize].mohq_name,
       VAL_STRING (prowvals + MOHQCOL_NAME));
-    LM_INFO ("Adding new queue (%s)", pnewlst [nsize].mohq_uri);
+    LM_INFO ("Added new queue (%s)", pnewlst [nsize].mohq_name);
     if (nsize)
       { shm_free (pmod_data->pmohq_lst); }
     pmod_data->pmohq_lst = pnewlst;
