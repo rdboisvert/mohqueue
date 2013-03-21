@@ -21,7 +21,6 @@
  *
  */
 
-#include "mohq_common.h"
 #include "mohq.h"
 #include "mohq_db.h"
 #include "mohq_funcs.h"
@@ -33,6 +32,13 @@
 #define SIPEOL  "\r\n"
 #define USRAGNT "Kamailio Message Queue"
 #define CLENHDR "Content-Length"
+#define RTPMAPCNT (sizeof (prtpmap) / sizeof (rtpmap))
+
+typedef struct
+  {
+  int ntype;
+  char *pencode;
+  } rtpmap;
 
 /**********
 * local constants
@@ -42,15 +48,48 @@ str p100rel [1] = {STR_STATIC_INIT ("100rel")};
 str pbye [1] = {STR_STATIC_INIT ("BYE")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
+str presp_noallow [1] = {STR_STATIC_INIT ("Method Not Allowed")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
+
+rtpmap prtpmap [] =
+  {
+  {9, "G722/8000"},
+  {0, "PCMU/8000"},
+  {8, "PCMA/8000"},
+  {18, "G729/8000"},
+  {3, "GSM/8000"},
+  {4, "G723/8000"},
+  {15, "G728/8000"},
+  {5, "DVI4/8000"},
+  {7, "LPC/8000"},
+  {12, "QCELP/8000"},
+  {13, "CN/8000"},
+  {16, "DVI4/11025"},
+  {6, "DVI4/16000"},
+  {17, "DVI4/22050"},
+  {10, "L16/44100"},
+  {11, "L16/44100"},
+  {14, "MPA/90000"}
+  };
 
 char pbyemsg [] =
   {
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
+  };
+
+str pextrahdr [1] =
+  {
+  STR_STATIC_INIT (
+  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  "Supported: 100rel" SIPEOL
+  "Accept-Language: en" SIPEOL
+  "Content-Type: application/sdp" SIPEOL
+  "User-Agent: " USRAGNT SIPEOL
+  )
   };
 
 char pinvitemsg [] =
@@ -80,6 +119,18 @@ char prefermsg [] =
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
   "Referred-By: <%.*s>" SIPEOL
+  };
+
+char prtpsdp [] =
+  {
+  "v=0" SIPEOL
+  // IP address and audio port faked since they will be replaced
+  "o=- 1 1 IN IP4 1.1.1.1" SIPEOL
+  "s=" USRAGNT SIPEOL
+  "c=IN IP4 1.1.1.1" SIPEOL
+  "t=0 0" SIPEOL
+  "a=sendrecv" SIPEOL
+  "m=audio 1 RTP/AVP"
   };
 
 /**********
@@ -764,15 +815,25 @@ int find_queue (str *pqname)
 {
 int nidx;
 str tmpstr;
+if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 500))
+  {
+  LM_ERR ("Unable to lock queues!");
+  return -1;
+  }
 for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   {
   tmpstr.s = pmod_data->pmohq_lst [nidx].mohq_name;
   tmpstr.len = strlen (tmpstr.s);
   if (STR_EQ (tmpstr, *pqname))
-    { return nidx; }
+    { break; }
   }
-LM_ERR ("Unable to find queue (%.*s)!", STR_FMT (pqname));
-return -1;
+if (nidx == pmod_data->mohq_cnt)
+  {
+  LM_ERR ("Unable to find queue (%.*s)!", STR_FMT (pqname));
+  nidx = -1;
+  }
+mohq_lock_release (pmod_data->pmohq_lock);
+return nidx;
 }
 
 /**********
@@ -961,6 +1022,100 @@ else
 
 send_rtp_answer (pmsg, pcall);
 return;
+}
+
+/**********
+* Form RTP SDP String
+*
+* INPUT:
+*   Arg (1) = string pointer
+*   Arg (2) = call pointer
+* OUTPUT: 0 if failed
+**********/
+
+int form_rtp_SDP (str *pstr, call_lst *pcall)
+
+{
+/**********
+* form file name
+**********/
+
+char *pfncname = "form_rtp_SDP: ";
+char pfile [MOHDIRLEN + MOHFILELEN + 6];
+strcpy (pfile, pcall->pmohq->mohq_mohdir);
+int nflen = strlen (pfile);
+pfile [nflen++] = '/';
+strcpy (&pfile [nflen], pcall->pmohq->mohq_mohfile);
+nflen += strlen (&pfile [nflen]);
+pfile [nflen++] = '.';
+
+/**********
+* find available files based on RTP payload type
+**********/
+
+int nidx;
+int pfound [RTPMAPCNT];
+int nfound = 0;
+int nsize = strlen (prtpsdp) + 2;
+for (nidx = 0; nidx < RTPMAPCNT; nidx++)
+  {
+  /**********
+  * o form file name based on payload type
+  * o exists?
+  * o save index and count chars
+  **********/
+
+  sprintf (&pfile [nflen], "%d", prtpmap [nidx].ntype);
+  struct stat psb [1];
+  if (lstat (pfile, psb))
+    { continue; }
+  pfound [nfound++] = nidx;
+  nsize += strlen (prtpmap [nidx].pencode) // encode length
+    + 19; // space, type number, "a=rtpmap:%d ", EOL
+  }
+if (!nfound)
+  {
+  LM_ERR ("%sUnable to find any MOH files for queue (%s)!", pfncname,
+    pcall->pmohq->mohq_name);
+  return 0;
+  }
+
+/**********
+* o allocate memory
+* o form SDP
+**********/
+
+pstr->s = pkg_malloc (nsize + 1);
+if (!pstr->s)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  return 0;
+  }
+strcpy (pstr->s, prtpsdp);
+nsize = strlen (pstr->s);
+for (nidx = 0; nidx < nfound; nidx++)
+  {
+  /**********
+  * add payload types to media description
+  **********/
+
+  sprintf (&pstr->s [nsize], " %d", prtpmap [pfound [nidx]].ntype);
+  nsize += strlen (&pstr->s [nsize]);
+  }
+strcpy (&pstr->s [nsize], SIPEOL);
+nsize += 2;
+for (nidx = 0; nidx < nfound; nidx++)
+  {
+  /**********
+  * add rtpmap attributes
+  **********/
+
+  sprintf (&pstr->s [nsize], "a=rtpmap:%d %s %s",
+    prtpmap [pfound [nidx]].ntype, prtpmap [pfound [nidx]].pencode, SIPEOL);
+  nsize += strlen (&pstr->s [nsize]);
+  }
+pstr->len = nsize;
+return 1;
 }
 
 /**********
@@ -1591,49 +1746,17 @@ for (npos1 = 0; npos1 < pbuf->len; npos1++)
   }
 
 /**********
-* define SDP body and headers
-*
-* NOTES:
-* o IP address is faked since it will be replaced
-* o all audio streams are offered but only available will be used
-**********/
-
-str pextrahdr [1] =
-  {
-  STR_STATIC_INIT (
-  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
-  "Supported: 100rel" SIPEOL
-  "Accept-Language: en" SIPEOL
-  "Content-Type: application/sdp" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
-  )
-  };
-
-str pSDP [1] =
-  {
-  STR_STATIC_INIT (
-  "v=0" SIPEOL
-  "o=- 1 1 IN IP4 1.1.1.1" SIPEOL
-  "s=" USRAGNT SIPEOL
-  "c=IN IP4 1.1.1.1" SIPEOL
-  "t=0 0" SIPEOL
-  "a=sendrecv" SIPEOL
-  "m=audio 1 RTP/AVP 9 0 8 18" SIPEOL
-  "a=rtpmap:9 G722/8000" SIPEOL
-  "a=rtpmap:0 PCMU/8000" SIPEOL
-  "a=rtpmap:8 PCMA/8000" SIPEOL
-  "a=rtpmap:18 G729/8000" SIPEOL
-  )
-  };
-
-/**********
 * recreate buffer with extra headers and SDP
+* o form SDP
 * o count hdrs, extra hdrs, content-length hdr, SDP
 * o alloc new buffer
 * o form new buffer
 * o replace orig buffer
 **********/
 
+str pSDP [1] = {STR_NULL};
+if (!form_rtp_SDP (pSDP, pcall))
+  { goto answer_done; }
 for (npos1 = npos2 = 0; npos2 < nhdrcnt; npos2++)
   { npos1 += pparse [npos2].len; }
 char pbodylen [30];
@@ -1672,7 +1795,9 @@ build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 0);
 memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 
 /**********
-* send rtpproxy answer
+* o send rtpproxy answer
+* o form stream file
+* o send stream
 **********/
 
 if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
@@ -1680,7 +1805,13 @@ if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
   LM_ERR ("%srtpproxy_answer refused", pfncname);
   goto answer_done;
   }
-str pMOH [1] = {STR_STATIC_INIT ("/var/build/music_on_hold")};
+char pfile [MOHDIRLEN + MOHFILELEN + 2];
+strcpy (pfile, pcall->pmohq->mohq_mohdir);
+npos1 = strlen (pfile);
+pfile [npos1++] = '/';
+strcpy (&pfile [npos1], pcall->pmohq->mohq_mohfile);
+npos1 += strlen (&pfile [npos1]);
+str pMOH [1] = {{pfile, npos1}};
 pv_elem_t *pmodel;
 pv_parse_format (pMOH, &pmodel);
 if (pmod_data->fn_rtp_stream2 (pnmsg, (char *)pmodel, (char *)-1) != 1)
@@ -1746,6 +1877,8 @@ return 1;
 **********/
 
 answer_done:
+if (pSDP->s)
+  { pkg_free (pSDP->s); }
 pkg_free (pbuf->s);
 return 0;
 }
@@ -1978,6 +2111,10 @@ switch (pmsg->REQ_METHOD)
     break;
   case METHOD_BYE:
     bye_msg (pmsg, mohq_idx);
+    break;
+  default:
+    if (pmod_data->psl->freply (pmsg, 405, presp_noallow) < 0)
+      { LM_ERR ("Unable to create reply to %.*s", STR_FMT (&smethod)); }
     break;
   }
 mohq_lock_release (pmod_data->pmohq_lock);

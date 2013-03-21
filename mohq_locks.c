@@ -21,7 +21,6 @@
  *
  */
 
-#include "mohq_common.h"
 #include "mohq.h"
 #include "mohq_locks.h"
 

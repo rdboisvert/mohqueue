@@ -20,4 +20,4 @@ CREATE TABLE mohqcalls (
   CONSTRAINT mohqcalls_idx UNIQUE (call_id)
 );
 
-INSERT INTO mohqueues (mohq_name, mohq_uri, mohq_mohdir, mohq_mohfile) values ('test','sip:9001@10.211.64.5','/var/build','music_on_hold');
+INSERT INTO mohqueues (mohq_name, mohq_uri, mohq_mohdir, mohq_mohfile) values ('test','sip:9001@10.211.64.5','/var/build/MOH','HeWillCall');

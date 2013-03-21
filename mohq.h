@@ -24,6 +24,7 @@
 #ifndef MOHQ_H
 #define MOHQ_H
 
+#include "mohq_common.h"
 #include "mohq_locks.h"
 
 /**********

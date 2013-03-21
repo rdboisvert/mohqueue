@@ -25,6 +25,7 @@
 #define MOHQ_COMMON_H
 
 #include <assert.h>
+#include <sys/stat.h>
 
 #include "../rr/api.h"
 

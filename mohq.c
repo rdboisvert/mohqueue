@@ -22,10 +22,8 @@
  */
 
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <stdlib.h>
 
-#include "mohq_common.h"
 #include "mohq.h"
 #include "mohq_db.h"
 #include "mohq_funcs.h"

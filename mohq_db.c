@@ -21,9 +21,6 @@
  *
  */
 
-#include <sys/stat.h>
-
-#include "mohq_common.h"
 #include "mohq.h"
 #include "mohq_db.h"
 
@@ -402,8 +399,8 @@ for (nidx = 0; nidx < nrows; nidx++)
   **********/
 
   prowvals = ROW_VALUES (prows + nidx);
-  char *pqname = VAL_STRING (prowvals + MOHQCOL_NAME);
-  puri = VAL_STRING (prowvals + MOHQCOL_URI);
+  char *pqname = (char *)VAL_STRING (prowvals + MOHQCOL_NAME);
+  puri = (char *)VAL_STRING (prowvals + MOHQCOL_URI);
   struct sip_uri puri_parsed [1];
   if (parse_uri (puri, strlen (puri), puri_parsed))
     {
@@ -421,7 +418,7 @@ for (nidx = 0; nidx < nrows; nidx++)
     { pmohdir = pmod_data->pcfg->mohdir; }
   else
     {
-    pmohdir = VAL_STRING (prowvals + MOHQCOL_MDIR);
+    pmohdir = (char *)VAL_STRING (prowvals + MOHQCOL_MDIR);
     if (!*pmohdir)
       { pmohdir = pmod_data->pcfg->mohdir; }
     else
@@ -472,14 +469,14 @@ for (nidx = 0; nidx < nrows; nidx++)
         LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
           STR_FMT (&MOHQCSTR_MDIR));
         }
-      ptext = VAL_STRING (prowvals + MOHQCOL_MFILE);
+      ptext = (char *)VAL_STRING (prowvals + MOHQCOL_MFILE);
       if (strcmp (pqlst [nidx2].mohq_mohfile, ptext))
         {
         strcpy (pqlst [nidx2].mohq_mohfile, ptext);
         LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
           STR_FMT (&MOHQCSTR_MFILE));
         }
-      ptext = VAL_STRING (prowvals + MOHQCOL_NAME);
+      ptext = (char *)VAL_STRING (prowvals + MOHQCOL_NAME);
       if (strcmp (pqlst [nidx2].mohq_name, ptext))
         {
         strcpy (pqlst [nidx2].mohq_name, ptext);
@@ -521,9 +518,9 @@ for (nidx = 0; nidx < nrows; nidx++)
     strcpy (pnewlst [nsize].mohq_uri, puri);
     strcpy (pnewlst [nsize].mohq_mohdir, pmohdir);
     strcpy (pnewlst [nsize].mohq_mohfile,
-      VAL_STRING (prowvals + MOHQCOL_MFILE));
+      (char *)VAL_STRING (prowvals + MOHQCOL_MFILE));
     strcpy (pnewlst [nsize].mohq_name,
-      VAL_STRING (prowvals + MOHQCOL_NAME));
+      (char *)VAL_STRING (prowvals + MOHQCOL_NAME));
     LM_INFO ("Added new queue (%s)", pnewlst [nsize].mohq_name);
     if (nsize)
       { shm_free (pmod_data->pmohq_lst); }
@@ -540,18 +537,11 @@ for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   {
   /**********
   * o exists?
-  * o has active calls?
   * o if not last, replace current with last queue
   **********/
 
   if (pqlst [nidx].mohq_flag & MOHQF_CHK)
     { continue; }
-  if (0) /* ??? need to check */
-    {
-    LM_WARN ("Unable to remove queue (%s) because has active calls!",
-      pqlst [nidx].mohq_name);
-    continue;
-    }
   LM_INFO ("Removed queue (%s)", pqlst [nidx].mohq_name);
   if (nidx != (pmod_data->mohq_cnt - 1))
     {
