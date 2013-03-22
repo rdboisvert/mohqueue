@@ -106,9 +106,9 @@ char pinvitemsg [] =
 char pinvitesdp [] =
   {
   "v=0" SIPEOL
-  "o=- %d %d IN IP4 %s" SIPEOL
+  "o=- %d %d IN %s" SIPEOL
   "s=" USRAGNT SIPEOL
-  "c=IN IP4 %s" SIPEOL
+  "c=IN %s" SIPEOL
   "t=0 0" SIPEOL
   "a=send%s" SIPEOL
   "m=audio %d RTP/AVP "
@@ -185,6 +185,7 @@ else
   {
   /**********
   * o release INVITE transaction
+  * o save SDP address info
   * o put in queue
   **********/
 
@@ -196,6 +197,9 @@ else
       { LM_ERR ("%sRelease transaction failed!", pfncname); }
     }
   pcall->call_hash = pcall->call_label = 0;
+  sprintf (pcall->call_addr, "%s %s",
+    pmsg->rcv.dst_ip.af == AF_INET ? "IP4" : "IP6",
+    ip_addr2a (&pmsg->rcv.dst_ip));
   pcall->call_state = CLSTA_INQUEUE;
   update_call_rec (pcall);
   pcall->call_cseq = 1;
@@ -361,7 +365,7 @@ phdrs->len = strlen (phdr);
 npos1 = 1;
 npos1 = sizeof (pinvitesdp) // INVITE template
   + 20 // session id + version
-  + 30 // server IP address twice
+  + strlen (pcall->call_addr) * 2 // server IP address twice
   + 4  // send type
   + 5  // media port number
   + (npos1 * 40); // media types
@@ -373,7 +377,7 @@ if (!psdp)
   }
 sprintf (psdp, pinvitesdp,
   time (0), time (0) + 1, // session id + version
-  "10.211.64.5", "10.211.64.5", // server IP address ???
+  pcall->call_addr, pcall->call_addr, // server IP address
   bhold ? "only" : "recv", // hold type
   pcall->call_aport); // audio port
 str pbody [1];
@@ -771,34 +775,42 @@ return -1;
 * Find mohq_id From URI
 *
 * INPUT:
-*   Arg (1) = URI text pointer
+*   Arg (1) = SIP message pointer
 * OUTPUT: queue index; -1 if unable to find
 **********/
 
-int find_mohq_id (char *uri)
+int find_mohq_id (sip_msg_t *pmsg)
 
 {
-int nidx;
-char *pfnd;
-mohq_lst *pqlst = pmod_data->pmohq_lst;
-do
-  {
-  /**********
-  * o search for URI
-  * o if uri parm, strip off and try again
-  **********/
+/**********
+* o find current RURI
+* o strip off parms or headers
+* o search MOH queue
+**********/
 
-  for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
+str *pruri =
+  pmsg->new_uri.s ? &pmsg->new_uri : &pmsg->first_line.u.request.uri;
+int nidx;
+str pstr [1];
+pstr->s = pruri->s;
+pstr->len = pruri->len;
+for (nidx = 0; nidx < pruri->len; nidx++)
+  {
+  if (pstr->s [nidx] == ';' || pstr->s [nidx] == '?')
     {
-    if (!strcmp (pqlst [nidx].mohq_uri, uri))
-      { return nidx; }
+    pstr->len = nidx;
+    break;
     }
-  pfnd = strchr (uri, ';');
-  if (!pfnd)
-    { break; }
-  *pfnd = '\0';
   }
-while (1);
+mohq_lst *pqlst = pmod_data->pmohq_lst;
+for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
+  {
+  str pmohstr [1];
+  pmohstr->s = pqlst [nidx].mohq_uri;
+  pmohstr->len = strlen (pmohstr->s);
+  if (STR_EQ (*pmohstr, *pstr))
+    { return nidx; }
+  }
 return -1;
 }
 
@@ -2043,17 +2055,9 @@ if (parse_headers (pmsg, HDR_EOH_F, 0) < 0)
   LM_ERR ("Unable to parse header!");
   return -1;
   }
-to_body_t *pto_body = get_to (pmsg);
-char *tmpstr = form_tmpstr (&pto_body->uri);
-if (!tmpstr)
-  { return -1; }
 if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 2000))
-  {
-  free_tmpstr (tmpstr);
-  return -1;
-  }
-int mohq_idx = find_mohq_id (tmpstr);
-free_tmpstr (tmpstr);
+  { return -1; }
+int mohq_idx = find_mohq_id (pmsg);
 db1_con_t *pconn = mohq_dbconnect ();
 if (pconn)
   {
@@ -2085,6 +2089,7 @@ if (mohq_idx < 0)
 * o release MOH queue
 **********/
 
+to_body_t *pto_body;
 str smethod = REQ_LINE (pmsg).method;
 LM_INFO ("???%.*s[%d]: [%d]%s", STR_FMT (&smethod), getpid (),
   mohq_idx, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
@@ -2095,6 +2100,7 @@ switch (pmsg->REQ_METHOD)
     * initial INVITE?
     **********/
 
+    pto_body = get_to (pmsg);
     if (!pto_body->tag_value.len)
       { first_invite_msg (pmsg, mohq_idx); }
     else

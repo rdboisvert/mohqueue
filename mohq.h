@@ -78,6 +78,7 @@ typedef struct
   char call_contact [URI_LEN + 1];
   char call_tag [101];
   char call_via [1024];
+  char call_addr [IP_ADDR_MAX_STR_SIZE + 4];
   int call_state;
   int call_cseq;
   int call_aport;

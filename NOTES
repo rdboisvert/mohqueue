@@ -1,10 +1,12 @@
+RFC3261, section 12.1.1 requires UAS to copy Record-Route
+
 Need to handle situation when call terminates when REFER in process.
+
+Need to support CANCEL.
 
 Need to use via when building messages.
 
 Find available MOH files and offer these only.
-
-Use URI comparison routine when checking if URI matches.
 
 Find out why URI wrong when build SIP msg from buffer.
 
