@@ -114,7 +114,9 @@ typedef struct
   cmd_function fn_rtp_answer;
   cmd_function fn_rtp_destroy;
   cmd_function fn_rtp_offer;
-  cmd_function fn_rtp_stream2;
+  cmd_function fn_rtp_stream_c;
+  cmd_function fn_rtp_stream_s;
+  cmd_function fn_rtp_stop_stream;
   } mod_data;
 
 /**********

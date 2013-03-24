@@ -29,6 +29,7 @@
 **********/
 
 int mohq_count (sip_msg_t *, pv_elem_t *, char *);
+void mohq_debug (char *, ...);
 int mohq_process (sip_msg_t *);
 int mohq_redirect (sip_msg_t *, pv_elem_t *, pv_elem_t *);
 

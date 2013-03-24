@@ -389,10 +389,22 @@ if (!pmod_data->fn_rtp_offer)
   LM_ERR ("Unable to load rtpproxy_offer");
   goto initerr;
   }
-pmod_data->fn_rtp_stream2 = find_export ("rtpproxy_stream2uac", 2, 0);
-if (!pmod_data->fn_rtp_stream2)
+pmod_data->fn_rtp_stream_c = find_export ("rtpproxy_stream2uac", 2, 0);
+if (!pmod_data->fn_rtp_stream_c)
   {
   LM_ERR ("Unable to load rtpproxy_stream2uac");
+  goto initerr;
+  }
+pmod_data->fn_rtp_stream_s = find_export ("rtpproxy_stream2uas", 2, 0);
+if (!pmod_data->fn_rtp_stream_s)
+  {
+  LM_ERR ("Unable to load rtpproxy_stream2uas");
+  goto initerr;
+  }
+pmod_data->fn_rtp_stop_stream = find_export ("rtpproxy_stop_stream2uas", 0, 0);
+if (!pmod_data->fn_rtp_stop_stream)
+  {
+  LM_ERR ("Unable to load rtpproxy_stop_stream2uas");
   goto initerr;
   }
 pmod_data->fn_rtp_destroy = find_export ("rtpproxy_destroy", 0, 0);

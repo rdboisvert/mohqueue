@@ -1,16 +1,16 @@
+Add feature to redirect an INVITE to a queue.
+
+Adjust documentation to match current mohqcalls table.
+
+Add debugging only for mohqueue.
+
 RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
 Need to handle situation when call terminates when REFER in process.
 
-Need to support CANCEL.
+Need to support CANCEL and re-INVITE.
 
 Need to use via when building messages.
-
-Find available MOH files and offer these only.
-
-Find out why URI wrong when build SIP msg from buffer.
-
-Accept-Language should be what is sent in INVITE.
 
 Document /etc/shorewall/rules changes.
 ACCEPT  C:$SIP  all     udp     9000,9010:9099
