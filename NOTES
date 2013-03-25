@@ -2,13 +2,9 @@ Add feature to redirect an INVITE to a queue.
 
 Adjust documentation to match current mohqcalls table.
 
-Add debugging only for mohqueue.
-
 RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
-Need to handle situation when call terminates when REFER in process.
-
-Need to support CANCEL and re-INVITE.
+Need to support CANCEL.
 
 Need to use via when building messages.
 

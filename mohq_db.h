@@ -33,12 +33,13 @@
 #define MOHQ_QTABLE_VERSION  1
 
 /* mohqueues columns */
-#define MOHQ_COLCNT   5
+#define MOHQ_COLCNT   6
 #define MOHQCOL_ID    0
 #define MOHQCOL_URI   1
 #define MOHQCOL_MDIR  2
 #define MOHQCOL_MFILE 3
 #define MOHQCOL_NAME  4
+#define MOHQCOL_DEBUG 5
 
 /* mohqcalls columns */
 #define CALL_COLCNT   6

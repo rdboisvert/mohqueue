@@ -40,9 +40,10 @@
 * structures
 **********/
 
-/* mohq_flag values */
+/* mohq_flags values */
 #define MOHQF_ACT 0x01
 #define MOHQF_CHK 0x02
+#define MOHQF_DBG 0x04
 
 typedef struct
   {
@@ -50,7 +51,7 @@ typedef struct
   char mohq_uri [URI_LEN + 1];
   char mohq_mohdir [MOHDIRLEN + 1];
   char mohq_mohfile [MOHFILELEN + 1];
-  int mohq_flag;
+  int mohq_flags;
   int mohq_id;
   mohq_lock pmohq_lock [1];
   } mohq_lst;

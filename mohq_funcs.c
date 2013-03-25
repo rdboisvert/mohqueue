@@ -144,6 +144,7 @@ char prtpsdp [] =
 **********/
 
 void delete_call (call_lst *);
+void drop_call (sip_msg_t *, call_lst *);
 int find_call (str *);
 int form_rtp_SDP (str *, call_lst *, char *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
@@ -198,7 +199,7 @@ if (pcall->call_state != CLSTA_INVITED)
     { LM_ERR ("%sUnexpected ACK (%s)!", pfncname, pcall->call_from); }
   else
     {
-    mohq_debug ("%sACK from refused re-INVITE (%s)!",
+    mohq_debug (pcall->pmohq, "%sACK from refused re-INVITE (%s)!",
       pfncname, pcall->call_from);
     }
   return;
@@ -230,7 +231,8 @@ sprintf (pcall->call_addr, "%s %s",
 pcall->call_state = CLSTA_INQUEUE;
 update_call_rec (pcall);
 pcall->call_cseq = 1;
-mohq_debug ("%sACK received for call (%s); placed in queue (%s)",
+mohq_debug (pcall->pmohq,
+  "%sACK received for call (%s); placed in queue (%s)",
   pfncname, pcall->call_from, pcall->pmohq->mohq_name);
 return;
 }
@@ -271,7 +273,7 @@ else
     }
   else
     {
-    mohq_debug ("%sCall (%s) BYE reply=%d", pfncname,
+    mohq_debug (pcall->pmohq, "%sCall (%s) BYE reply=%d", pfncname,
       pcall->call_from, nreply);
     }
   }
@@ -319,20 +321,14 @@ if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   LM_ERR ("%sUnable to create reply to call (%s)", pfncname,
     pcall->call_from);
   }
-if (pcall->call_state < CLSTA_INQUEUE)
+if (pcall->call_state >= CLSTA_INQUEUE)
+  { drop_call (pmsg, pcall); }
+else
   {
   LM_ERR ("%sEnding call (%s) before placed in queue!",
     pfncname, pcall->call_from);
+  delete_call (pcall);
   }
-else
-  {
-  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
-    {
-    LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
-      pfncname, pcall->call_from);
-    }
-  }
-delete_call (pcall);
 return;
 }
 
@@ -477,8 +473,8 @@ if (ptm->t_request_within (puac) < 0)
 else
   {
   nret = 1;
-  mohq_debug ("%sSent re-INVITE request for call (%s)", pfncname,
-    pcall->call_from);
+  mohq_debug (pcall->pmohq, "%sSent re-INVITE request for call (%s)",
+    pfncname, pcall->call_from);
   }
 
 /**********
@@ -618,7 +614,8 @@ if (ptm->t_request_within (puac) < 0)
     pfncname, pcall->call_from);
   goto bye_err;
   }
-mohq_debug ("%sSent BYE request for call (%s)", pfncname, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sSent BYE request for call (%s)",
+  pfncname, pcall->call_from);
 bsent = 1;
 
 /**********
@@ -759,8 +756,8 @@ for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
 pcall->call_state = CLSTA_ENTER;
 add_call_rec (ncall_idx);
 mohq_lock_set (pmod_data->pmohq_lock, 0, 0);
-mohq_debug ("%sAdded call (%s) to queue (%s)", pfncname,
-    pcall->call_from, pcall->pmohq->mohq_name);
+mohq_debug (pcall->pmohq, "%sAdded call (%s) to queue (%s)",
+  pfncname, pcall->call_from, pcall->pmohq->mohq_name);
 return ncall_idx;
 }
 
@@ -781,11 +778,38 @@ void delete_call (call_lst *pcall)
 * o release MOH queue
 **********/
 
-mohq_debug ("delete_call: Deleting call (%s) from queue (%s)",
+mohq_debug (pcall->pmohq, "delete_call: Deleting call (%s) from queue (%s)",
   pcall->call_from, pcall->pmohq->mohq_name);
 delete_call_rec (pcall);
 pcall->call_active = 0;
 mohq_lock_release (pmod_data->pmohq_lock);
+return;
+}
+
+/**********
+* Drop the Call
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = call pointer
+* OUTPUT: none
+**********/
+
+void drop_call (sip_msg_t *pmsg, call_lst *pcall)
+
+{
+/**********
+* o destroy proxy connection
+* o delete call
+**********/
+
+char *pfncname = "drop_call: ";
+if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+  {
+  LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
+    pfncname, pcall->call_from);
+  }
+delete_call (pcall);
 return;
 }
 
@@ -1108,7 +1132,8 @@ else
   else
     {
     pcall->call_state = CLSTA_RINGING;
-    mohq_debug ("%sSent RINGING for call (%s)", pfncname, pcall->call_from);
+    mohq_debug (pcall->pmohq, "%sSent RINGING for call (%s)",
+      pfncname, pcall->call_from);
     }
   }
 
@@ -1239,16 +1264,12 @@ switch (ntype)
   {
   case TMCB_ON_FAILURE:
     /**********
-    * if hold off, return call to queue
+    * drop call
     **********/
 
     LM_ERR ("%sHold failed for call (%s)!", pfncname, pcall->call_from);
-    if (pcall->call_state == CLSTA_NHLDSTRT)
-      {
-      pcall->call_state = CLSTA_INQUEUE;
-      update_call_rec (pcall);
-      return;
-      }
+    drop_call (pcbp->rpl, pcall);
+    return;
     break;
   case TMCB_LOCAL_COMPLETED:
     /**********
@@ -1263,8 +1284,8 @@ switch (ntype)
       }
     else
       {
-      mohq_debug ("%sCall (%s) hold reply=%d", pfncname,
-        pcall->call_from, nreply);
+      mohq_debug (pcall->pmohq, "%sCall (%s) hold reply=%d",
+        pfncname, pcall->call_from, nreply);
       }
     break;
   }
@@ -1442,8 +1463,8 @@ if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   return;
   }
 int nreply = pstart->u.reply.statuscode;
-mohq_debug ("%sNOTIFY received reply (%d) for call (%s)", pfncname,
-  nreply, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sNOTIFY received reply (%d) for call (%s)",
+  pfncname, nreply, pcall->call_from);
 switch (nreply / 100)
   {
   case 1:
@@ -1453,6 +1474,15 @@ switch (nreply / 100)
     break;
   default:
     LM_ERR ("%sUnable to redirect call (%s)!", pfncname, pcall->call_from);
+    if (nreply == 487)
+      {
+      /**********
+      * call was canceled
+      **********/
+
+      drop_call (pmsg, pcall);
+      return;
+      }
     if (!change_hold (pcall, 0))
       {
       pcall->call_state = CLSTA_INQUEUE;
@@ -1662,7 +1692,8 @@ if (ptm->t_request_within (puac) < 0)
   update_call_rec (pcall);
   goto refererr;
   }
-mohq_debug ("%sSent REFER request for call (%s)", pfncname, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sSent REFER request for call (%s)",
+  pfncname, pcall->call_from);
 nret = -1;
 
 refererr:
@@ -1692,16 +1723,15 @@ if (ntype == TMCB_ON_FAILURE)
   {
   LM_ERR ("%sCall (%s) did not respond to REFER", pfncname,
     pcall->call_from);
-  pcall->call_state = CLSTA_INQUEUE;
-  update_call_rec (pcall);
+  drop_call (pcbp->rpl, pcall);
   return;
   }
 int nreply = pcbp->rpl->first_line.u.reply.statuscode;
 if ((nreply / 100) == 2)
   {
   pcall->call_state = CLSTA_RFRWAIT;
-  mohq_debug ("%sCall (%s) REFER reply=%d", pfncname,
-    pcall->call_from, nreply);
+  mohq_debug (pcall->pmohq, "%sCall (%s) REFER reply=%d",
+    pfncname, pcall->call_from, nreply);
   }
 else
   {
@@ -1743,7 +1773,8 @@ if (ncall_idx == -1)
   return;
   }
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
-mohq_debug ("%sre-INVITE refused for call (%s)", pfncname, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sre-INVITE refused for call (%s)",
+  pfncname, pcall->call_from);
 if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
   { LM_ERR ("%sUnable to create reply!", pfncname); }
 return;
@@ -1835,7 +1866,8 @@ if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
   return 0;
   }
 pcall->call_state = CLSTA_PRACKSTRT;
-mohq_debug ("%sSent RINGING for call (%s)", pfncname, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sSent RINGING for call (%s)",
+  pfncname, pcall->call_from);
 
 /**********
 * o wait until PRACK
@@ -2074,7 +2106,7 @@ if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
   goto answer_done;
   }
 pcall->call_state = CLSTA_INVITED;
-mohq_debug ("%sResponded to INVITE with RTP for call (%s)",
+mohq_debug (pcall->pmohq, "%sResponded to INVITE with RTP for call (%s)",
   pfncname, pcall->call_from);
 nret = 1;
 
@@ -2260,15 +2292,16 @@ return 1;
 }
 
 /**********
-* Print Debug Statement
+* Log Debug Statement
 *
 * INPUT:
-*   Arg (1) = format pointer
+*   Arg (1) = MOH queue pointer
+*   Arg (2) = format pointer
 *   Arg (...) = optional format values
 * OUTPUT: outputs debugging values
 **********/
 
-void mohq_debug (char *pfmt, ...)
+void mohq_debug (mohq_lst *pmohq, char *pfmt, ...)
 
 {
 /**********
@@ -2280,7 +2313,7 @@ void mohq_debug (char *pfmt, ...)
 **********/
 
 int nsys_log = get_debug_level ();
-int nmohq_log = L_DBG;// ??? need to define
+int nmohq_log = (pmohq->mohq_flags & MOHQF_DBG) ? L_DBG : L_INFO;
 if (nmohq_log < L_DBG && nsys_log < L_DBG)
   { return; }
 if (nsys_log < nmohq_log)
@@ -2356,7 +2389,8 @@ if (mohq_idx < 0)
 
 to_body_t *pto_body;
 str smethod = REQ_LINE (pmsg).method;
-mohq_debug ("%sProcessing %.*s, queue (%s)", pfncname, STR_FMT (&smethod),
+mohq_debug (&pmod_data->pmohq_lst [mohq_idx],
+  "%sProcessing %.*s, queue (%s)", pfncname, STR_FMT (&smethod),
   pmod_data->pmohq_lst [mohq_idx].mohq_name);
 switch (pmsg->REQ_METHOD)
   {
@@ -2396,7 +2430,7 @@ return 0;
 }
 
 /**********
-* Redirect Oldest Queued Call
+* Retrieve Oldest Queued Call
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
@@ -2405,7 +2439,7 @@ return 0;
 * OUTPUT: -1 if no items in queue; else redirects oldest call
 **********/
 
-int mohq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
+int mohq_retrieve (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
 
 {
 /**********
@@ -2413,7 +2447,7 @@ int mohq_redirect (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
 * o check URI
 **********/
 
-char *pfncname = "mohq_redirect: ";
+char *pfncname = "mohq_retrieve: ";
 str puri [1], pqname [1];
 if (!pqueue || !pURI)
   {
@@ -2506,4 +2540,79 @@ if (!change_hold (pcall, 0))
   update_call_rec (pcall);
   }
 return -1;
+}
+
+/**********
+* Send Message to Queue
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = queue name
+* OUTPUT: -1 if no items in queue; 1 if successfull
+**********/
+
+int mohq_send (sip_msg_t *pmsg, pv_elem_t *pqueue)
+
+{
+/**********
+* o first INVITE?
+* o get queue name
+**********/
+
+char *pfncname = "mohq_send: ";
+if (pmsg->REQ_METHOD != METHOD_INVITE)
+  {
+  LM_ERR ("%sNot an INVITE message!", pfncname);
+  return -1;
+  }
+to_body_t *pto_body = get_to (pmsg);
+if (pto_body->tag_value.len)
+  {
+  LM_ERR ("%sNot a first INVITE message!", pfncname);
+  return -1;
+  }
+str pqname [1];
+if (!pqueue)
+  {
+  LM_ERR ("%sParameters missing!", pfncname);
+  return -1;
+  }
+if (pv_printf_s (pmsg, pqueue, pqname))
+  {
+  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  return -1;
+  }
+
+/**********
+* o find queue
+* o change RURI
+* o lock queue
+* o add message to queue
+**********/
+
+int nq_idx = find_queue (pqname);
+if (nq_idx == -1)
+  { return -1; }
+str pruri [1] = {{0, strlen (pmod_data->pmohq_lst [nq_idx].mohq_uri)}};
+pruri->s = pkg_malloc (pruri->len + 1);
+if (!pruri->s)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  return -1;
+  }
+strcpy (pruri->s, pmod_data->pmohq_lst [nq_idx].mohq_uri);
+if (pmsg->new_uri.s)
+  { pkg_free (pmsg->new_uri.s); }
+pmsg->new_uri.s = pruri->s;
+pmsg->new_uri.len = pruri->len;
+pmsg->parsed_uri_ok = 0;
+pmsg->parsed_orig_ruri_ok = 0;
+if (!mohq_lock_set (pmod_data->pmohq_lock, 1, 200))
+  {
+  LM_ERR ("%sUnable to lock queue!", pfncname);
+  return -1;
+  }
+first_invite_msg (pmsg, nq_idx);
+mohq_lock_release (pmod_data->pmohq_lock);
+return 1;
 }

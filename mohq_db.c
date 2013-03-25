@@ -29,10 +29,11 @@
 **********/
 
 str MOHQCSTR_ID = STR_STATIC_INIT ("id");
-str MOHQCSTR_URI = STR_STATIC_INIT ("mohq_uri");
-str MOHQCSTR_MDIR = STR_STATIC_INIT ("mohq_mohdir");
-str MOHQCSTR_MFILE = STR_STATIC_INIT ("mohq_mohfile");
-str MOHQCSTR_NAME = STR_STATIC_INIT ("mohq_name");
+str MOHQCSTR_URI = STR_STATIC_INIT ("uri");
+str MOHQCSTR_MDIR = STR_STATIC_INIT ("mohdir");
+str MOHQCSTR_MFILE = STR_STATIC_INIT ("mohfile");
+str MOHQCSTR_NAME = STR_STATIC_INIT ("name");
+str MOHQCSTR_DEBUG = STR_STATIC_INIT ("debug");
 
 static str *mohq_columns [] =
   {
@@ -41,6 +42,7 @@ static str *mohq_columns [] =
   &MOHQCSTR_MDIR,
   &MOHQCSTR_MFILE,
   &MOHQCSTR_NAME,
+  &MOHQCSTR_DEBUG,
   NULL
   };
 
@@ -375,7 +377,7 @@ db_func_t *pdb = pmod_data->pdb;
 mohq_lst *pqlst = pmod_data->pmohq_lst;
 int nidx;
 for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
-  { pqlst [nidx].mohq_flag &= ~MOHQF_CHK; }
+  { pqlst [nidx].mohq_flags &= ~MOHQF_CHK; }
 pdb->use_table (pconn, &pmod_data->pcfg->db_qtable);
 db_key_t prkeys [MOHQ_COLCNT];
 for (nidx = 0; nidx < MOHQ_COLCNT; nidx++)
@@ -483,8 +485,18 @@ for (nidx = 0; nidx < nrows; nidx++)
         LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
           STR_FMT (&MOHQCSTR_NAME));
         }
+      int bdebug = VAL_INT (prowvals + MOHQCOL_DEBUG) ? MOHQF_DBG : 0;
+      if ((pqlst [nidx2].mohq_flags & MOHQF_DBG) != bdebug)
+        {
+        if (bdebug)
+          { pqlst [nidx2].mohq_flags |= MOHQF_DBG; }
+        else
+          { pqlst [nidx2].mohq_flags &= ~MOHQF_DBG; }
+        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+          STR_FMT (&MOHQCSTR_DEBUG));
+        }
       bfnd = -1;
-      pqlst [nidx2].mohq_flag |= MOHQF_CHK;
+      pqlst [nidx2].mohq_flags |= MOHQF_CHK;
       break;
       }
     }
@@ -514,13 +526,15 @@ for (nidx = 0; nidx < nrows; nidx++)
     if (--nsize)
       { memcpy (pnewlst, pqlst, sizeof (mohq_lst) * nsize); }
     pnewlst [nsize].mohq_id = prowvals [MOHQCOL_ID].val.int_val;
-    pnewlst [nsize].mohq_flag = MOHQF_CHK;
+    pnewlst [nsize].mohq_flags = MOHQF_CHK;
     strcpy (pnewlst [nsize].mohq_uri, puri);
     strcpy (pnewlst [nsize].mohq_mohdir, pmohdir);
     strcpy (pnewlst [nsize].mohq_mohfile,
       (char *)VAL_STRING (prowvals + MOHQCOL_MFILE));
     strcpy (pnewlst [nsize].mohq_name,
       (char *)VAL_STRING (prowvals + MOHQCOL_NAME));
+    if (VAL_INT (prowvals + MOHQCOL_DEBUG))
+      { pnewlst [nsize].mohq_flags |= MOHQF_DBG; }
     LM_INFO ("Added new queue (%s)", pnewlst [nsize].mohq_name);
     if (nsize)
       { shm_free (pmod_data->pmohq_lst); }
@@ -540,7 +554,7 @@ for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
   * o if not last, replace current with last queue
   **********/
 
-  if (pqlst [nidx].mohq_flag & MOHQF_CHK)
+  if (pqlst [nidx].mohq_flags & MOHQF_CHK)
     { continue; }
   LM_INFO ("Removed queue (%s)", pqlst [nidx].mohq_name);
   if (nidx != (pmod_data->mohq_cnt - 1))

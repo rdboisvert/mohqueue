@@ -55,8 +55,9 @@ static cmd_export_t mod_cmds [] = {
   { "mohq_count", (cmd_function) mohq_count, 2, fixup_count, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
   { "mohq_process", (cmd_function) mohq_process, 0, NULL, 0, REQUEST_ROUTE },
-  { "mohq_redirect", (cmd_function) mohq_redirect, 2, str_fixup, 0,
+  { "mohq_retrieve", (cmd_function) mohq_retrieve, 2, str_fixup, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
+  { "mohq_send", (cmd_function) mohq_send, 1, str_fixup, 0, REQUEST_ROUTE },
   { NULL, NULL, -1, 0, 0 },
 };
 
