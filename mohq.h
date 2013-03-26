@@ -62,6 +62,7 @@ typedef struct
 #define CLSTA_PRACKRPLY 102
 #define CLSTA_RINGING   103
 #define CLSTA_INVITED   104
+#define CLSTA_CANCEL    105
 #define CLSTA_INQUEUE   200
 #define CLSTA_HLDSTRT   301
 #define CLSTA_REFER     302
@@ -74,6 +75,7 @@ typedef struct
   {
   int call_active;
   char call_id [101];
+  char call_branch [101];
   char call_from [URI_LEN + 1];
   char call_referto [URI_LEN + 1];
   char call_contact [URI_LEN + 1];

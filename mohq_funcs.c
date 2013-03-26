@@ -54,6 +54,7 @@ str presp_noaccept [1] = {STR_STATIC_INIT ("Not Acceptable Here")};
 str presp_noallow [1] = {STR_STATIC_INIT ("Method Not Allowed")};
 str presp_nocall [1] = {STR_STATIC_INIT ("Call/Transaction Does Not Exist")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
+str presp_reqterm [1] = {STR_STATIC_INIT ("Request Terminated")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
 str presp_srverr [1] = {STR_STATIC_INIT ("Server Internal Error")};
@@ -145,7 +146,6 @@ char prtpsdp [] =
 
 void delete_call (call_lst *);
 void drop_call (sip_msg_t *, call_lst *);
-int find_call (str *);
 int form_rtp_SDP (str *, call_lst *, char *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
@@ -165,28 +165,18 @@ int start_stream (sip_msg_t *, call_lst *, int);
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void ack_msg (sip_msg_t *pmsg, int mohq_idx)
+void ack_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o get call ID
-* o record exists?
-* o part of INVITE?
+* part of INVITE?
 **********/
 
 char *pfncname = "ack_msg: ";
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx == -1)
-  {
-  LM_ERR ("%sACK (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  return;
-  }
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 struct cell *ptrans;
 tm_api_t *ptm = pmod_data->ptm;
 if (pcall->call_state != CLSTA_INVITED)
@@ -286,36 +276,20 @@ return;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void bye_msg (sip_msg_t *pmsg, int mohq_idx)
+void bye_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
-/**********
-* o get call ID
-* o record exists?
-**********/
-
-char *pfncname = "bye_msg: ";
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx == -1)
-  {
-  LM_ERR ("%sBYE (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
-  }
-
 /**********
 * o send OK
 * o destroy proxy
 * o teardown queue
 **********/
 
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+char *pfncname = "bye_msg: ";
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply to call (%s)", pfncname,
@@ -328,6 +302,41 @@ else
   LM_ERR ("%sEnding call (%s) before placed in queue!",
     pfncname, pcall->call_from);
   delete_call (pcall);
+  }
+return;
+}
+
+/**********
+* Process CANCEL Message
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = call pointer
+* OUTPUT: none
+**********/
+
+void cancel_msg (sip_msg_t *pmsg, call_lst *pcall)
+
+{
+/**********
+* still in INVITE dialog?
+**********/
+
+char *pfncname = "cancel_msg: ";
+if (pcall->call_state < CLSTA_INQUEUE)
+  {
+  pcall->call_state = CLSTA_CANCEL;
+  mohq_debug (pcall->pmohq, "%sCANCELed call (%s)",
+    pfncname, pcall->call_from);
+  if (pmod_data->psl->freply (pmsg, 487, presp_reqterm) < 0)
+    { LM_ERR ("%sUnable to create reply!", pfncname); }
+  }
+else
+  {
+  LM_ERR ("%sUnable to CANCEL because accepted INVITE for call (%s)!",
+    pfncname, pcall->call_from);
+  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
+    { LM_ERR ("%sUnable to create reply!", pfncname); }
   }
 return;
 }
@@ -696,6 +705,14 @@ else
   strncpy (pcall->call_contact, pstr->s, pstr->len);
   pcall->call_contact [pstr->len] = '\0';
   }
+if (!pmsg->via1 || !pmsg->via1->branch)
+  { pcall->call_branch [0] = '\0'; }
+else
+  {
+  strncpy (pcall->call_branch, pmsg->via1->branch->value.s,
+    pmsg->via1->branch->value.len);
+  pcall->call_branch [pmsg->via1->branch->value.len] = '\0';
+  }
 
 /**********
 * extract Via
@@ -814,54 +831,15 @@ return;
 }
 
 /**********
-* Find Call from CallID
-*
-* INPUT:
-*   Arg (1) = call ID str pointer
-* OUTPUT: call index; -1 if unable to find
-**********/
-
-int find_call (str *pcallid)
-
-{
-/**********
-* o lock calls
-* o find call
-**********/
-
-int nidx;
-str tmpstr;
-char *pfncname = "find_call: ";
-if (!mohq_lock_set (pmod_data->pcall_lock, 1, 2000))
-  {
-  LM_ERR ("%sUnable to lock calls!", pfncname);
-  return -1;
-  }
-for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
-  {
-  if (!pmod_data->pcall_lst [nidx].call_active)
-    { continue; }
-  tmpstr.s = pmod_data->pcall_lst [nidx].call_id;
-  tmpstr.len = strlen (tmpstr.s);
-  if (STR_EQ (tmpstr, *pcallid))
-    {
-    mohq_lock_release (pmod_data->pcall_lock);
-    return nidx;
-    }
-  }
-mohq_lock_release (pmod_data->pcall_lock);
-return -1;
-}
-
-/**********
-* Find mohq_id From URI
+* Find Call
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
+*   Arg (2) = pointer to call pointer
 * OUTPUT: queue index; -1 if unable to find
 **********/
 
-int find_mohq_id (sip_msg_t *pmsg)
+int find_call (sip_msg_t *pmsg, call_lst **ppcall)
 
 {
 /**********
@@ -885,13 +863,65 @@ for (nidx = 0; nidx < pruri->len; nidx++)
     }
   }
 mohq_lst *pqlst = pmod_data->pmohq_lst;
-for (nidx = 0; nidx < pmod_data->mohq_cnt; nidx++)
+int nqidx;
+for (nqidx = 0; nqidx < pmod_data->mohq_cnt; nqidx++)
   {
   str pmohstr [1];
-  pmohstr->s = pqlst [nidx].mohq_uri;
+  pmohstr->s = pqlst [nqidx].mohq_uri;
   pmohstr->len = strlen (pmohstr->s);
   if (STR_EQ (*pmohstr, *pstr))
-    { return nidx; }
+    { break; }
+  }
+*ppcall = 0;
+if (nqidx == pmod_data->mohq_cnt)
+  { return -1;}
+
+/**********
+* o first invite?
+* o get callID and branch
+* o search call queue
+**********/
+
+if (pmsg->REQ_METHOD == METHOD_INVITE)
+  {
+  to_body_t *pto_body = get_to (pmsg);
+  if (!pto_body->tag_value.len)
+    { return nqidx; }
+  }
+if (!pmsg->callid)
+  { return -1; }
+str *pcallid = &pmsg->callid->body;
+if (!pcallid)
+  { return -1; }
+str *pbranch;
+str pempty [1] = {STR_NULL};
+if (pmsg->via1 && pmsg->via1->branch)
+  { pbranch = &pmsg->via1->branch->value; }
+else
+  { pbranch = pempty; }
+for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+  {
+  /**********
+  * o call active?
+  * o callID matches?
+  * o branch matches?
+  * o return call pointer
+  **********/
+
+  call_lst *pcall = &pmod_data->pcall_lst [nidx];
+  if (!pcall->call_active)
+    { continue; }
+  str tmpstr [1];
+  tmpstr->s = pcall->call_id;
+  tmpstr->len = strlen (tmpstr->s);
+  if (!STR_EQ (*tmpstr, *pcallid))
+    { continue; }
+  tmpstr->s = pcall->call_branch;
+  tmpstr->len = strlen (tmpstr->s);
+  if (!STR_EQ (*tmpstr, *pbranch))
+    { continue; }
+  *ppcall = pcall;
+  return nqidx;
   }
 return -1;
 }
@@ -999,30 +1029,14 @@ void first_invite_msg (sip_msg_t *pmsg, int mohq_idx)
 
 {
 /**********
-* o get call ID
-* o record exists?
-**********/
-
-char *pfncname = "first_invite_msg: ";
-tm_api_t *ptm = pmod_data->ptm;
-call_lst *pcall;
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx != -1)
-  {
-  LM_ERR ("%sINVITE (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
-  }
-
-/**********
 * o create new transaction
 * o SDP exists?
 * o accepts REFER?
 * o send rtpproxy offer
 **********/
 
+char *pfncname = "first_invite_msg: ";
+tm_api_t *ptm = pmod_data->ptm;
 if (ptm->t_newtran (pmsg) < 0)
   {
   LM_ERR ("%sUnable to create new transaction for call (%.*s)!",
@@ -1064,7 +1078,7 @@ if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
     { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
   return;
   }
-ncall_idx = create_call (mohq_idx, pmsg, ptotag);
+int ncall_idx = create_call (mohq_idx, pmsg, ptotag);
 if (ncall_idx == -1)
   { return; }
 
@@ -1076,7 +1090,7 @@ if (ncall_idx == -1)
 * o exit if not ringing
 **********/
 
-pcall = &pmod_data->pcall_lst [ncall_idx];
+call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 pcall->call_cseq = 1;
 if (ptm->register_tmcb (pmsg, 0, TMCB_ON_FAILURE | TMCB_DESTROY,
   invite_cb, pcall, 0) < 0)
@@ -1138,13 +1152,26 @@ else
   }
 
 /**********
-* since t_reply_with_body takes the shortcut of unreferencing the
-* transaction we have to create a SIP body send it through rtpproxy
-* and then use the result to build the final response
+* o call cancelled?
+* o accept call with RTP
 **********/
 
+if (pcall->call_state == CLSTA_CANCEL)
+  {
+  if (ptm->t_release (pmsg) < 0)
+    {
+    LM_ERR ("%sRelease transaction failed for call (%s)!",
+      pfncname, pcall->call_from);
+    }
+  delete_call (pcall);
+  return;
+  }
 if (!send_rtp_answer (pmsg, pcall))
-  { delete_call (pcall); }
+  {
+  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
+    { LM_ERR ("%sUnable to create reply!", pfncname); }
+  delete_call (pcall);
+  }
 return;
 }
 
@@ -1370,30 +1397,18 @@ switch (pcall->call_state)
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void notify_msg (sip_msg_t *pmsg, int mohq_idx)
+void notify_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o get call ID
-* o record exists?
-* o waiting on REFER?
+* waiting on REFER?
 **********/
 
 char *pfncname = "notify_msg: ";
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx == -1)
-  {
-  LM_ERR ("%sNOTIFY (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
-  }
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 if (pcall->call_state != CLSTA_RFRWAIT)
   {
   LM_ERR ("%sNot waiting on a REFER for call (%s)!", pfncname,
@@ -1498,30 +1513,19 @@ return;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void prack_msg (sip_msg_t *pmsg, int mohq_idx)
+void prack_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o get call ID
-* o record exists?
+* waiting on PRACK?
 **********/
 
 char *pfncname = "prack_msg: ";
 tm_api_t *ptm = pmod_data->ptm;
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx == -1)
-  {
-  LM_ERR ("%sPRACK (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
-  }
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 if (pcall->call_state != CLSTA_PRACKSTRT)
   {
   LM_ERR ("%sUnexpected PRACK (%s)!", pfncname, pcall->call_from);
@@ -1748,31 +1752,18 @@ return;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-*   Arg (2) = queue index
-*   Arg (3) = tag string pointer
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void reinvite_msg (sip_msg_t *pmsg, int mohq_idx, str *tag_value)
+void reinvite_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o get call ID
-* o record exists?
-* o for now, reject re-INVITE
+* for now, reject re-INVITE
 **********/
 
 char *pfncname = "reinvite_msg: ";
-int ncall_idx = find_call (&pmsg->callid->body);
-if (ncall_idx == -1)
-  {
-  LM_ERR ("%sre-INVITE (%.*s) not part of existing dialog!", pfncname,
-    STR_FMT (&pmsg->callid->body));
-  if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
-  }
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 mohq_debug (pcall->pmohq, "%sre-INVITE refused for call (%s)",
   pfncname, pcall->call_from);
 if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
@@ -1882,7 +1873,14 @@ while (1)
   }
 unlink_lump_rpl (pmsg, *phdrlump);
 if (pcall->call_state != CLSTA_PRACKRPLY)
-  { return 0; }
+  {
+  if (ptm->t_release (pmsg) < 0)
+    {
+    LM_ERR ("%sRelease transaction failed for call (%s)!",
+      pfncname, pcall->call_from);
+    }
+  return 0;
+  }
 return 1;
 }
 
@@ -1917,8 +1915,6 @@ if (!pbuf->s || !pbuf->len)
   {
   LM_ERR ("%sUnable to create SDP response for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   return 0;
   }
 
@@ -2029,16 +2025,10 @@ if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_answer refused for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   goto answer_done;
   }
 if (!start_stream (pnmsg, pcall, 0))
-  {
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
-  goto answer_done;
-  }
+  { goto answer_done; }
 
 /**********
 * o create buffer from response
@@ -2052,8 +2042,6 @@ if (!pbuf->s || !pbuf->len)
   {
   LM_ERR ("%sUnable to create SDP response for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   goto answer_done;
   }
 str pnewSDP [1];
@@ -2078,8 +2066,6 @@ if (!pfnd)
   // should not happen
   LM_ERR ("%sUnable to find audio port for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   goto answer_done;
   }
 pcall->call_aport = strtol (pfnd + 8, NULL, 10);
@@ -2087,16 +2073,12 @@ if (!add_lump_rpl2 (pmsg, pextrahdr->s, pextrahdr->len, LUMP_RPL_HDR))
   {
   LM_ERR ("%sUnable to add header for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   goto answer_done;
   }
 if (!add_lump_rpl2 (pmsg, pnewSDP->s, pnewSDP->len, LUMP_RPL_BODY))
   {
   LM_ERR ("%sUnable to add SDP body for call (%s)!",
     pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
   goto answer_done;
   }
 if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
@@ -2355,7 +2337,8 @@ if (parse_headers (pmsg, HDR_EOH_F, 0) < 0)
   }
 if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 2000))
   { return -1; }
-int mohq_idx = find_mohq_id (pmsg);
+call_lst *pcall;
+int mohq_idx = find_call (pmsg, &pcall);
 db1_con_t *pconn = mohq_dbconnect ();
 if (pconn)
   {
@@ -2387,7 +2370,6 @@ if (mohq_idx < 0)
 * o release MOH queue
 **********/
 
-to_body_t *pto_body;
 str smethod = REQ_LINE (pmsg).method;
 mohq_debug (&pmod_data->pmohq_lst [mohq_idx],
   "%sProcessing %.*s, queue (%s)", pfncname, STR_FMT (&smethod),
@@ -2399,23 +2381,25 @@ switch (pmsg->REQ_METHOD)
     * initial INVITE?
     **********/
 
-    pto_body = get_to (pmsg);
-    if (!pto_body->tag_value.len)
+    if (!pcall)
       { first_invite_msg (pmsg, mohq_idx); }
     else
-      { reinvite_msg (pmsg, mohq_idx, &pto_body->tag_value); }
+      { reinvite_msg (pmsg, pcall); }
     break;
   case METHOD_NOTIFY:
-    notify_msg (pmsg, mohq_idx);
+    notify_msg (pmsg, pcall);
     break;
   case METHOD_PRACK:
-    prack_msg (pmsg, mohq_idx);
+    prack_msg (pmsg, pcall);
     break;
   case METHOD_ACK:
-    ack_msg (pmsg, mohq_idx);
+    ack_msg (pmsg, pcall);
     break;
   case METHOD_BYE:
-    bye_msg (pmsg, mohq_idx);
+    bye_msg (pmsg, pcall);
+    break;
+  case METHOD_CANCEL:
+    cancel_msg (pmsg, pcall);
     break;
   default:
     if (pmod_data->psl->freply (pmsg, 405, presp_noallow) < 0)
@@ -2548,7 +2532,7 @@ return -1;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue name
-* OUTPUT: -1 if no items in queue; 1 if successfull
+* OUTPUT: -1 if no items in queue; 0 if successfull
 **********/
 
 int mohq_send (sip_msg_t *pmsg, pv_elem_t *pqueue)
@@ -2586,8 +2570,7 @@ if (pv_printf_s (pmsg, pqueue, pqname))
 /**********
 * o find queue
 * o change RURI
-* o lock queue
-* o add message to queue
+* o relay message
 **********/
 
 int nq_idx = find_queue (pqname);
@@ -2607,12 +2590,10 @@ pmsg->new_uri.s = pruri->s;
 pmsg->new_uri.len = pruri->len;
 pmsg->parsed_uri_ok = 0;
 pmsg->parsed_orig_ruri_ok = 0;
-if (!mohq_lock_set (pmod_data->pmohq_lock, 1, 200))
+if (pmod_data->ptm->t_relay (pmsg, 0, 0) < 0)
   {
-  LM_ERR ("%sUnable to lock queue!", pfncname);
+  LM_ERR ("%sUnable to relay INVITE!", pfncname);
   return -1;
   }
-first_invite_msg (pmsg, nq_idx);
-mohq_lock_release (pmod_data->pmohq_lock);
-return 1;
+return 0;
 }

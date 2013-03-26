@@ -1,10 +1,8 @@
-Add feature to redirect an INVITE to a queue.
-
 Adjust documentation to match current mohqcalls table.
 
-RFC3261, section 12.1.1 requires UAS to copy Record-Route
+Document mohq_send ()/mohq_retrieve ().
 
-Need to support CANCEL.
+RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
 Need to use via when building messages.
 

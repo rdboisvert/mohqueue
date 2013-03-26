@@ -6,7 +6,8 @@ CREATE TABLE mohqueues (
   mohdir VARCHAR(100),
   mohfile VARCHAR(100) NOT NULL,
   debug INTEGER NOT NULL,
-  CONSTRAINT mohqueue_idx UNIQUE (uri)
+  CONSTRAINT mohqueue_uri_idx UNIQUE (uri),
+  CONSTRAINT mohqueue_name_idx UNIQUE (name)
 );
 
 INSERT INTO version (table_name, table_version) values ('mohqcalls','1');
