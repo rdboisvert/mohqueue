@@ -4,6 +4,8 @@ Document mohq_send ()/mohq_retrieve ().
 
 RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
+Need to respond to re-INVITE?
+
 Need to use via when building messages.
 
 Document /etc/shorewall/rules changes.

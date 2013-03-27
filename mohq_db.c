@@ -406,7 +406,7 @@ for (nidx = 0; nidx < nrows; nidx++)
   struct sip_uri puri_parsed [1];
   if (parse_uri (puri, strlen (puri), puri_parsed))
     {
-    LM_ERR ("Queue %s, Field %.*s: %s is not a valid URI!", pqname,
+    LM_ERR ("Queue,Field (%s,%.*s): %s is not a valid URI!", pqname,
       STR_FMT (&MOHQCSTR_URI), puri);
     continue;
     }
@@ -434,7 +434,7 @@ for (nidx = 0; nidx < nrows; nidx++)
       struct stat psb [1];
       if (lstat (pmohdir, psb))
         {
-        LM_ERR ("Queue %s, Field %.*s: Unable to find %s!", pqname,
+        LM_ERR ("Queue,Field (%s,%.*s): Unable to find %s!", pqname,
           STR_FMT (&MOHQCSTR_MDIR), pmohdir);
         continue;
         }
@@ -442,7 +442,7 @@ for (nidx = 0; nidx < nrows; nidx++)
         {
         if ((psb->st_mode & S_IFMT) != S_IFDIR)
           {
-          LM_ERR ("Queue %s, Field %.*s: %s is not a directory!", pqname,
+          LM_ERR ("Queue,Field (%s,%.*s): %s is not a directory!", pqname,
             STR_FMT (&MOHQCSTR_MDIR), pmohdir);
           continue;
           }
@@ -451,11 +451,49 @@ for (nidx = 0; nidx < nrows; nidx++)
     }
 
   /**********
+  * check for MOH files
+  * o form file name
+  * o search for MOH file
+  **********/
+
+  char pfile [MOHDIRLEN + MOHFILELEN + 6];
+  strcpy (pfile, pmohdir);
+  int nflen = strlen (pfile);
+  pfile [nflen++] = '/';
+  strcpy (&pfile [nflen], (char *)VAL_STRING (prowvals + MOHQCOL_MFILE));
+  nflen += strlen (&pfile [nflen]);
+  pfile [nflen++] = '.';
+  int bfnd = 0;
+  int nidx2;
+  for (nidx2 = 0; prtpmap [nidx2].pencode; nidx2++)
+    {
+    /**********
+    * o form file name based on payload type
+    * o exists?
+    * o save index and count chars
+    **********/
+
+    sprintf (&pfile [nflen], "%d", prtpmap [nidx2].ntype);
+    struct stat psb [1];
+    if (!lstat (pfile, psb))
+      {
+      bfnd = 1;
+      break;
+      }
+    }
+  if (!bfnd)
+    {
+    pfile [nflen] = '\0';
+    LM_ERR ("Queue,Field (%s,%.*s): Unable to find MOH files (%s*)!", pqname,
+          STR_FMT (&MOHQCSTR_MDIR), pfile);
+    continue;
+    }
+
+  /**********
   * find matching queues
   **********/
 
-  int bfnd = 0;
-  int nidx2;
+  bfnd = 0;
   for (nidx2 = 0; nidx2 < pmod_data->mohq_cnt; nidx2++)
     {
     if (!strcasecmp (pqlst [nidx2].mohq_uri, puri))
@@ -468,21 +506,21 @@ for (nidx = 0; nidx < nrows; nidx++)
       if (strcmp (pqlst [nidx2].mohq_mohdir, pmohdir))
         {
         strcpy (pqlst [nidx2].mohq_mohdir, pmohdir);
-        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+        LM_INFO ("Queue,Field (%s,%.*s): Changed", pqname,
           STR_FMT (&MOHQCSTR_MDIR));
         }
       ptext = (char *)VAL_STRING (prowvals + MOHQCOL_MFILE);
       if (strcmp (pqlst [nidx2].mohq_mohfile, ptext))
         {
         strcpy (pqlst [nidx2].mohq_mohfile, ptext);
-        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+        LM_INFO ("Queue,Field (%s,%.*s): Changed", pqname,
           STR_FMT (&MOHQCSTR_MFILE));
         }
       ptext = (char *)VAL_STRING (prowvals + MOHQCOL_NAME);
       if (strcmp (pqlst [nidx2].mohq_name, ptext))
         {
         strcpy (pqlst [nidx2].mohq_name, ptext);
-        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+        LM_INFO ("Queue,Field (%s,%.*s): Changed", pqname,
           STR_FMT (&MOHQCSTR_NAME));
         }
       int bdebug = VAL_INT (prowvals + MOHQCOL_DEBUG) ? MOHQF_DBG : 0;
@@ -492,7 +530,7 @@ for (nidx = 0; nidx < nrows; nidx++)
           { pqlst [nidx2].mohq_flags |= MOHQF_DBG; }
         else
           { pqlst [nidx2].mohq_flags &= ~MOHQF_DBG; }
-        LM_INFO ("Queue %s, Field %.*s: Changed", pqname,
+        LM_INFO ("Queue,Field (%s,%.*s): Changed", pqname,
           STR_FMT (&MOHQCSTR_DEBUG));
         }
       bfnd = -1;

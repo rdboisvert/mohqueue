@@ -40,6 +40,12 @@
 * structures
 **********/
 
+typedef struct
+  {
+  int ntype;
+  char *pencode;
+  } rtpmap;
+
 /* mohq_flags values */
 #define MOHQF_ACT 0x01
 #define MOHQF_CHK 0x02
@@ -64,18 +70,17 @@ typedef struct
 #define CLSTA_INVITED   104
 #define CLSTA_CANCEL    105
 #define CLSTA_INQUEUE   200
+#define CLSTA_HOLD      201
 #define CLSTA_HLDSTRT   301
 #define CLSTA_REFER     302
 #define CLSTA_RFRWAIT   303
 #define CLSTA_NHLDSTRT  304
 #define CLSTA_BYE       305
-#define CLSTA_ERR       900
 
 typedef struct
   {
   int call_active;
   char call_id [101];
-  char call_branch [101];
   char call_from [URI_LEN + 1];
   char call_referto [URI_LEN + 1];
   char call_contact [URI_LEN + 1];
@@ -127,5 +132,6 @@ typedef struct
 **********/
 
 extern mod_data *pmod_data;
+extern rtpmap prtpmap [];
 
 #endif /* MOHQ_H */

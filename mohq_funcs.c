@@ -34,19 +34,13 @@
 #define SIPEOL  "\r\n"
 #define USRAGNT "Kamailio Message Queue"
 #define CLENHDR "Content-Length"
-#define RTPMAPCNT (sizeof (prtpmap) / sizeof (rtpmap))
-
-typedef struct
-  {
-  int ntype;
-  char *pencode;
-  } rtpmap;
 
 /**********
 * local constants
 **********/
 
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
+str paudio [1] = {STR_STATIC_INIT ("audio")};
 str pbye [1] = {STR_STATIC_INIT ("BYE")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
@@ -54,6 +48,7 @@ str presp_noaccept [1] = {STR_STATIC_INIT ("Not Acceptable Here")};
 str presp_noallow [1] = {STR_STATIC_INIT ("Method Not Allowed")};
 str presp_nocall [1] = {STR_STATIC_INIT ("Call/Transaction Does Not Exist")};
 str presp_ok [1] = {STR_STATIC_INIT ("OK")};
+str presp_reqpend [1] = {STR_STATIC_INIT ("Request Pending")};
 str presp_reqterm [1] = {STR_STATIC_INIT ("Request Terminated")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
@@ -78,7 +73,8 @@ rtpmap prtpmap [] =
   {17, "DVI4/22050"},
   {10, "L16/44100"},
   {11, "L16/44100"},
-  {14, "MPA/90000"}
+  {14, "MPA/90000"},
+  {0, 0}
   };
 
 char pbyemsg [] =
@@ -705,14 +701,6 @@ else
   strncpy (pcall->call_contact, pstr->s, pstr->len);
   pcall->call_contact [pstr->len] = '\0';
   }
-if (!pmsg->via1 || !pmsg->via1->branch)
-  { pcall->call_branch [0] = '\0'; }
-else
-  {
-  strncpy (pcall->call_branch, pmsg->via1->branch->value.s,
-    pmsg->via1->branch->value.len);
-  pcall->call_branch [pmsg->via1->branch->value.len] = '\0';
-  }
 
 /**********
 * extract Via
@@ -877,15 +865,17 @@ if (nqidx == pmod_data->mohq_cnt)
   { return -1;}
 
 /**********
-* o first invite?
-* o get callID and branch
+* o get to tag
+* o first INVITE?
+* o get callID
+* o ignore to tag if CANCEL on first INVITE
 * o search call queue
 **********/
 
+str *ptotag = &(get_to (pmsg)->tag_value);
 if (pmsg->REQ_METHOD == METHOD_INVITE)
   {
-  to_body_t *pto_body = get_to (pmsg);
-  if (!pto_body->tag_value.len)
+  if (!ptotag->len)
     { return nqidx; }
   }
 if (!pmsg->callid)
@@ -893,18 +883,17 @@ if (!pmsg->callid)
 str *pcallid = &pmsg->callid->body;
 if (!pcallid)
   { return -1; }
-str *pbranch;
-str pempty [1] = {STR_NULL};
-if (pmsg->via1 && pmsg->via1->branch)
-  { pbranch = &pmsg->via1->branch->value; }
-else
-  { pbranch = pempty; }
+if (pmsg->REQ_METHOD == METHOD_CANCEL)
+  {
+  if (!ptotag->len)
+    { ptotag = 0; }
+  }
 for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   {
   /**********
   * o call active?
   * o callID matches?
-  * o branch matches?
+  * o to tag matches?
   * o return call pointer
   **********/
 
@@ -916,10 +905,13 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   tmpstr->len = strlen (tmpstr->s);
   if (!STR_EQ (*tmpstr, *pcallid))
     { continue; }
-  tmpstr->s = pcall->call_branch;
-  tmpstr->len = strlen (tmpstr->s);
-  if (!STR_EQ (*tmpstr, *pbranch))
-    { continue; }
+  if (ptotag)
+    {
+    tmpstr->s = pcall->call_tag;
+    tmpstr->len = strlen (tmpstr->s);
+    if (!STR_EQ (*tmpstr, *ptotag))
+      { continue; }
+    }
   *ppcall = pcall;
   return nqidx;
   }
@@ -1206,10 +1198,10 @@ pfile [nflen++] = '.';
 **********/
 
 int nidx;
-int pfound [RTPMAPCNT];
+int pfound [30];
 int nfound = 0;
 int nsize = strlen (pSDP) + 2;
-for (nidx = 0; nidx < RTPMAPCNT; nidx++)
+for (nidx = 0; prtpmap [nidx].pencode; nidx++)
   {
   /**********
   * o form file name based on payload type
@@ -1308,6 +1300,11 @@ switch (ntype)
       {
       LM_ERR ("%sCall (%s) hold error (%d)", pfncname,
         pcall->call_from, nreply);
+      if ((nreply == 481) || (nreply == 487))
+        {
+        drop_call (pcbp->rpl, pcall);
+        return;
+        }
       }
     else
       {
@@ -1383,11 +1380,11 @@ switch (pcall->call_state)
   case CLSTA_PRACKSTRT:
     LM_ERR ("%sNo provisional response received for call (%s)!",
       pfncname, pcall->call_from);
-    pcall->call_state = CLSTA_ERR;
+    pcall->call_state = CLSTA_CANCEL;
     break;
   case CLSTA_INVITED:
     LM_ERR ("%sINVITE failed for call (%s)!", pfncname, pcall->call_from);
-    delete_call (pcall);
+    drop_call (pcbp->rpl, pcall);
     break;
   }
 }
@@ -1550,14 +1547,12 @@ if (ptm->t_newtran (pmsg) < 0)
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  pcall->call_state = CLSTA_ERR;
   return;
   }
 if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
   {
   LM_ERR ("%sUnable to reply to PRACK for call (%s)!",
     pfncname, pcall->call_from);
-  pcall->call_state = CLSTA_ERR;
   return;
   }
 pcall->call_state = CLSTA_PRACKRPLY;
@@ -1760,13 +1755,75 @@ void reinvite_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* for now, reject re-INVITE
+* RFC 3261 section 14.2
+* o dialog pending?
+* o get SDP
 **********/
 
 char *pfncname = "reinvite_msg: ";
-mohq_debug (pcall->pmohq, "%sre-INVITE refused for call (%s)",
-  pfncname, pcall->call_from);
-if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+if ((pcall->call_state / 100) < 2)
+  {
+  mohq_debug (pcall->pmohq, "%sINVITE still pending for call (%s)",
+    pfncname, pcall->call_from);
+  if (pmod_data->psl->freply (pmsg, 491, presp_reqpend) < 0)
+    { LM_ERR ("%sUnable to create reply!", pfncname); }
+  return;
+  }
+if (!(pmsg->msg_flags & FL_SDP_BODY))
+  {
+  if (parse_sdp (pmsg))
+    {
+    LM_ERR ("%sre-INVITE lacks SDP (%s)!", pfncname, pcall->call_from);
+    if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+      { LM_ERR ("%sUnable to create reply!", pfncname); }
+    return;
+    }
+  }
+
+/**********
+* look for hold condition
+**********/
+
+int bhold = -1;
+int nsession;
+sdp_session_cell_t *psession;
+for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
+  {
+  int nstream;
+  sdp_stream_cell_t *pstream;
+  for (nstream = 0; (pstream = get_sdp_stream (pmsg, nsession, nstream));
+    nstream++)
+    {
+    /**********
+    * o RTP?
+    * o audio?
+    * o get hold
+    **********/
+
+    if (!pstream->is_rtp)
+      { continue; }
+    if (!STR_EQ (*paudio, pstream->media))
+      { continue; }
+    bhold = pstream->is_on_hold ? 1 : 0;
+    }
+  }
+
+/**********
+* o found hold?
+* o accept hold change
+**********/
+
+if (bhold == -1)
+  {
+  mohq_debug (pcall->pmohq, "%sre-INVITE refused for call (%s)",
+    pfncname, pcall->call_from);
+  if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+    { LM_ERR ("%sUnable to create reply!", pfncname); }
+  return;
+  }
+mohq_debug (pcall->pmohq, "%shold changed to %d for call (%s)",
+  pfncname, bhold, pcall->call_from);
+if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   { LM_ERR ("%sUnable to create reply!", pfncname); }
 return;
 }
@@ -1834,7 +1891,6 @@ pcall->call_cseq = rand ();
 char phdrtmp [200];
 char *phdrtmplt =
   "Accept-Language: en" SIPEOL
-  "Allow-Events: conference,talk,hold" SIPEOL
   "Require: 100rel" SIPEOL
   "RSeq: %d" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
