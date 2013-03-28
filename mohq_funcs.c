@@ -31,9 +31,10 @@
 * definitions
 **********/
 
-#define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio Message Queue"
+#define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
+#define SIPEOL  "\r\n"
+#define USRAGNT "Kamailio MOH Queue v1.0"
 
 /**********
 * local constants
@@ -77,6 +78,10 @@ rtpmap prtpmap [] =
   {0, 0}
   };
 
+rtpmap *pmohfiles [30]; // element cout should be equal or greater than prtpmap
+
+str pallowhdr [1] = { STR_STATIC_INIT (ALLOWHDR SIPEOL) };
+
 char pbyemsg [] =
   {
   "Max-Forwards: 70" SIPEOL
@@ -87,7 +92,7 @@ char pbyemsg [] =
 str pextrahdr [1] =
   {
   STR_STATIC_INIT (
-  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  ALLOWHDR SIPEOL
   "Supported: 100rel" SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
@@ -117,7 +122,7 @@ char preinvitemsg [] =
   {
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
-  "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER" SIPEOL
+  ALLOWHDR SIPEOL
   "Supported: 100rel" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
   "Accept-Language: en" SIPEOL
@@ -792,6 +797,45 @@ return;
 }
 
 /**********
+* Deny Method
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+* OUTPUT: none
+**********/
+
+void deny_method (sip_msg_t *pmsg)
+
+{
+/**********
+* RFC 3261 section 8.2.1
+* o get transaction
+* o respond with 405 and Allow header
+**********/
+
+char *pfncname = "deny_method: ";
+tm_api_t *ptm = pmod_data->ptm;
+if (ptm->t_newtran (pmsg) < 0)
+  {
+  LM_ERR ("%sUnable to create new transaction!", pfncname);
+  if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
+    {
+    LM_ERR ("%sUnable to create reply to %.*s!", pfncname,
+      STR_FMT (&REQ_LINE (pmsg).method));
+    }
+  return;
+  }
+if (!add_lump_rpl2 (pmsg, pallowhdr->s, pallowhdr->len, LUMP_RPL_HDR))
+  { LM_ERR ("%sUnable to add Allow header!", pfncname); }
+if (ptm->t_reply (pmsg, 405, presp_noallow->s) < 0)
+  {
+  LM_ERR ("%sUnable to create reply to %.*s!", pfncname,
+    STR_FMT (&REQ_LINE (pmsg).method));
+  }
+return;
+}
+
+/**********
 * Drop the Call
 *
 * INPUT:
@@ -1181,47 +1225,25 @@ int form_rtp_SDP (str *pstr, call_lst *pcall, char *pSDP)
 
 {
 /**********
-* form file name
+* o find available files
+* o calculate size of SDP
 **********/
 
 char *pfncname = "form_rtp_SDP: ";
-char pfile [MOHDIRLEN + MOHFILELEN + 6];
-strcpy (pfile, pcall->pmohq->mohq_mohdir);
-int nflen = strlen (pfile);
-pfile [nflen++] = '/';
-strcpy (&pfile [nflen], pcall->pmohq->mohq_mohfile);
-nflen += strlen (&pfile [nflen]);
-pfile [nflen++] = '.';
-
-/**********
-* find available files based on RTP payload type
-**********/
-
-int nidx;
-int pfound [30];
-int nfound = 0;
-int nsize = strlen (pSDP) + 2;
-for (nidx = 0; prtpmap [nidx].pencode; nidx++)
-  {
-  /**********
-  * o form file name based on payload type
-  * o exists?
-  * o save index and count chars
-  **********/
-
-  sprintf (&pfile [nflen], "%d", prtpmap [nidx].ntype);
-  struct stat psb [1];
-  if (lstat (pfile, psb))
-    { continue; }
-  pfound [nfound++] = nidx;
-  nsize += strlen (prtpmap [nidx].pencode) // encode length
-    + 19; // space, type number, "a=rtpmap:%d ", EOL
-  }
-if (!nfound)
+rtpmap **pmohfiles = find_MOH (pcall->pmohq->mohq_mohdir,
+  pcall->pmohq->mohq_mohfile);
+if (!pmohfiles [0])
   {
   LM_ERR ("%sUnable to find any MOH files for queue (%s)!", pfncname,
     pcall->pmohq->mohq_name);
   return 0;
+  }
+int nsize = strlen (pSDP) + 2;
+int nidx;
+for (nidx = 0; pmohfiles [nidx]; nidx++)
+  {
+  nsize += strlen (pmohfiles [nidx]->pencode) // encode length
+    + 19; // space, type number, "a=rtpmap:%d ", EOL
   }
 
 /**********
@@ -1237,25 +1259,25 @@ if (!pstr->s)
   }
 strcpy (pstr->s, pSDP);
 nsize = strlen (pstr->s);
-for (nidx = 0; nidx < nfound; nidx++)
+for (nidx = 0; pmohfiles [nidx]; nidx++)
   {
   /**********
   * add payload types to media description
   **********/
 
-  sprintf (&pstr->s [nsize], " %d", prtpmap [pfound [nidx]].ntype);
+  sprintf (&pstr->s [nsize], " %d", pmohfiles [nidx]->ntype);
   nsize += strlen (&pstr->s [nsize]);
   }
 strcpy (&pstr->s [nsize], SIPEOL);
 nsize += 2;
-for (nidx = 0; nidx < nfound; nidx++)
+for (nidx = 0; pmohfiles [nidx]; nidx++)
   {
   /**********
   * add rtpmap attributes
   **********/
 
   sprintf (&pstr->s [nsize], "a=rtpmap:%d %s %s",
-    prtpmap [pfound [nidx]].ntype, prtpmap [pfound [nidx]].pencode, SIPEOL);
+    pmohfiles [nidx]->ntype, pmohfiles [nidx]->pencode, SIPEOL);
   nsize += strlen (&pstr->s [nsize]);
   }
 pstr->len = nsize;
@@ -1781,10 +1803,14 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
   }
 
 /**********
-* look for hold condition
+* o find available MOH files
+* o look for hold condition and matching payload type
 **********/
 
-int bhold = -1;
+rtpmap **pmohfiles = find_MOH (pcall->pmohq->mohq_mohdir,
+  pcall->pmohq->mohq_mohfile);
+int bhold = 0;
+int bmatch = 0;
 int nsession;
 sdp_session_cell_t *psession;
 for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
@@ -1797,34 +1823,75 @@ for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
     /**********
     * o RTP?
     * o audio?
-    * o get hold
+    * o hold?
+    * o at least one payload matches?
     **********/
 
     if (!pstream->is_rtp)
       { continue; }
     if (!STR_EQ (*paudio, pstream->media))
       { continue; }
-    bhold = pstream->is_on_hold ? 1 : 0;
+    if (pstream->is_on_hold)
+      {
+      bhold = 1;
+      break;
+      }
+    if (bmatch)
+      { continue; }
+
+    /**********
+    * check payload types for a match
+    **********/
+
+    sdp_payload_attr_t *ppayload;
+    for (ppayload = pstream->payload_attr; ppayload; ppayload = ppayload->next)
+      {
+      int ntype = atoi (ppayload->rtp_payload.s);
+      int nidx;
+      for (nidx = 0; pmohfiles [nidx]; nidx++)
+        {
+        if (pmohfiles [nidx]->ntype == ntype)
+          {
+          bmatch = 1;
+          break;
+          }
+        }
+      }
     }
   }
 
 /**********
-* o found hold?
-* o accept hold change
+* if no hold, allow re-INVITE if matching file
 **********/
 
-if (bhold == -1)
+if (!bhold)
   {
-  mohq_debug (pcall->pmohq, "%sre-INVITE refused for call (%s)",
-    pfncname, pcall->call_from);
-  if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
+  if (!bmatch)
+    {
+    LM_ERR ("%sre-INVITE refused because no matching payload for call (%s)!",
+      pfncname, pcall->call_from);
+    if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+      { LM_ERR ("%sUnable to create reply!", pfncname); }
+    }
+  else
+    {
+    mohq_debug (pcall->pmohq, "%sAccepted re-INVITE for call (%s)",
+      pfncname, pcall->call_from);
+    if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
+      { LM_ERR ("%sUnable to create reply!", pfncname); }
+    }
   return;
   }
-mohq_debug (pcall->pmohq, "%shold changed to %d for call (%s)",
-  pfncname, bhold, pcall->call_from);
+
+/**********
+* hold not allowed, say good-bye
+**********/
+
+LM_ERR ("%sTerminating call (%s) because hold not allowed!",
+  pfncname, pcall->call_from);
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   { LM_ERR ("%sUnable to create reply!", pfncname); }
+close_call (pmsg, pcall);
 return;
 }
 
@@ -2235,6 +2302,53 @@ return;
 **********/
 
 /**********
+* Find MOH Files
+*
+* INPUT:
+*   Arg (1) = mohdir pointer
+*   Arg (2) = mohfile pointer
+* OUTPUT: array of pointers for matching files; last element=0
+**********/
+
+rtpmap **find_MOH (char *pmohdir, char *pmohfile)
+
+{
+/**********
+* form base file name
+**********/
+
+char pfile [MOHDIRLEN + MOHFILELEN + 6];
+strcpy (pfile, pmohdir);
+int nflen = strlen (pfile);
+pfile [nflen++] = '/';
+strcpy (&pfile [nflen], pmohfile);
+nflen += strlen (&pfile [nflen]);
+pfile [nflen++] = '.';
+
+/**********
+* find available files based on RTP payload type
+**********/
+
+int nidx;
+int nfound = 0;
+for (nidx = 0; prtpmap [nidx].pencode; nidx++)
+  {
+  /**********
+  * o form file name based on payload type
+  * o exists?
+  **********/
+
+  sprintf (&pfile [nflen], "%d", prtpmap [nidx].ntype);
+  struct stat psb [1];
+  if (lstat (pfile, psb))
+    { continue; }
+  pmohfiles [nfound++] = &prtpmap [nidx];
+  }
+pmohfiles [nfound] = 0;
+return pmohfiles;
+}
+
+/**********
 * Count Messages
 *
 * INPUT:
@@ -2426,9 +2540,9 @@ if (mohq_idx < 0)
 * o release MOH queue
 **********/
 
-str smethod = REQ_LINE (pmsg).method;
 mohq_debug (&pmod_data->pmohq_lst [mohq_idx],
-  "%sProcessing %.*s, queue (%s)", pfncname, STR_FMT (&smethod),
+  "%sProcessing %.*s, queue (%s)", pfncname,
+  STR_FMT (&REQ_LINE (pmsg).method),
   pmod_data->pmohq_lst [mohq_idx].mohq_name);
 switch (pmsg->REQ_METHOD)
   {
@@ -2458,11 +2572,7 @@ switch (pmsg->REQ_METHOD)
     cancel_msg (pmsg, pcall);
     break;
   default:
-    if (pmod_data->psl->freply (pmsg, 405, presp_noallow) < 0)
-      {
-      LM_ERR ("%sUnable to create reply to %.*s!", pfncname,
-        STR_FMT (&smethod));
-      }
+    deny_method (pmsg);
     break;
   }
 mohq_lock_release (pmod_data->pmohq_lock);

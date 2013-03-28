@@ -1,12 +1,8 @@
-Adjust documentation to match current mohqcalls table.
-
-Document mohq_send ()/mohq_retrieve ().
-
 RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
-Need to respond to re-INVITE?
-
 Need to use via when building messages.
+
+Should probably respond when caller says BYE after queue says BYE.
 
 Document /etc/shorewall/rules changes.
 ACCEPT  C:$SIP  all     udp     9000,9010:9099

@@ -59,7 +59,6 @@ typedef struct
   char mohq_mohfile [MOHFILELEN + 1];
   int mohq_flags;
   int mohq_id;
-  mohq_lock pmohq_lock [1];
   } mohq_lst;
 
 /* call_state values */
@@ -70,7 +69,6 @@ typedef struct
 #define CLSTA_INVITED   104
 #define CLSTA_CANCEL    105
 #define CLSTA_INQUEUE   200
-#define CLSTA_HOLD      201
 #define CLSTA_HLDSTRT   301
 #define CLSTA_REFER     302
 #define CLSTA_RFRWAIT   303

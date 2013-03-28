@@ -28,6 +28,7 @@
 * module function declarations
 **********/
 
+rtpmap **find_MOH (char *, char *);
 int mohq_count (sip_msg_t *, pv_elem_t *, char *);
 void mohq_debug (mohq_lst *, char *, ...);
 int mohq_process (sip_msg_t *);
