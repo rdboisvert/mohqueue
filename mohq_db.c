@@ -217,7 +217,7 @@ fill_call_vals (prvals, pcall, CALL_COLCNT);
 if (pdb->insert (pconn, prkeys, prvals, CALL_COLCNT) < 0)
   {
   LM_WARN ("%sUnable to add new row to %s", pfncname,
-    pmod_data->pcfg->db_qtable.s);
+    pmod_data->pcfg->db_ctable.s);
   }
 mohq_dbdisconnect (pconn);
 return;
@@ -244,7 +244,7 @@ pdb->use_table (pconn, &pmod_data->pcfg->db_ctable);
 if (pdb->delete (pconn, 0, 0, 0, 0) < 0)
   {
   LM_WARN ("%sUnable to delete all rows from %s", pfncname,
-    pmod_data->pcfg->db_qtable.s);
+    pmod_data->pcfg->db_ctable.s);
   }
 return;
 }
@@ -278,7 +278,7 @@ set_call_val (prvals, 0, CALLCOL_CALL, pcall->call_id);
 if (pdb->delete (pconn, prkeys, 0, prvals, 1) < 0)
   {
   LM_WARN ("%sUnable to delete row from %s", pfncname,
-    pmod_data->pcfg->db_qtable.s);
+    pmod_data->pcfg->db_ctable.s);
   }
 mohq_dbdisconnect (pconn);
 return;
@@ -346,6 +346,48 @@ db_key_t pukeys [1];
 set_call_key (pukeys, 0, CALLCOL_STATE);
 db_val_t puvals [1];
 fill_call_vals (puvals, pcall, CALLCOL_STATE);
+if (pdb->update (pconn, pqkeys, 0, pqvals, pukeys, puvals, 1, 1) < 0)
+  {
+  LM_WARN ("%sUnable to update row in %s", pfncname,
+    pmod_data->pcfg->db_ctable.s);
+  }
+mohq_dbdisconnect (pconn);
+return;
+}
+
+/**********
+* Update Debug Record
+*
+* INPUT:
+*   Arg (1) = MOH queue pointer
+*   Arg (2) = debug flag
+* OUTPUT: none
+**********/
+
+void update_debug (mohq_lst *pqueue, int bdebug)
+
+{
+/**********
+* o setup to update based on queue name
+* o update record
+**********/
+
+char *pfncname = "update_debug: ";
+db1_con_t *pconn = mohq_dbconnect ();
+if (!pconn)
+  { return; }
+db_func_t *pdb = pmod_data->pdb;
+pdb->use_table (pconn, &pmod_data->pcfg->db_qtable);
+db_key_t pqkeys [1] = { mohq_columns [MOHQCOL_NAME] };
+db_val_t pqvals [1];
+pqvals->val.string_val = pqueue->mohq_name;
+pqvals->type = DB1_STRING;
+pqvals->nul = 0;
+db_key_t pukeys [1] = { mohq_columns [MOHQCOL_DEBUG] };
+db_val_t puvals [1];
+puvals->val.int_val = bdebug;
+puvals->type = DB1_INT;
+puvals->nul = 0;
 if (pdb->update (pconn, pqkeys, 0, pqvals, pukeys, puvals, 1, 1) < 0)
   {
   LM_WARN ("%sUnable to update row in %s", pfncname,

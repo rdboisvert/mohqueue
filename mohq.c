@@ -50,7 +50,7 @@ mod_data *pmod_data;
 * module exports
 **********/
 
-/* EXPORTED COMMANDS */
+/* COMMANDS */
 static cmd_export_t mod_cmds [] = {
   { "mohq_count", (cmd_function) mohq_count, 2, fixup_count, 0,
     REQUEST_ROUTE | FAILURE_ROUTE | ONREPLY_ROUTE },
@@ -61,7 +61,7 @@ static cmd_export_t mod_cmds [] = {
   { NULL, NULL, -1, 0, 0 },
 };
 
-/* EXPORTED PARAMETERS */
+/* PARAMETERS */
 char *db_url = DEFAULT_DB_URL;
 char *db_ctable = "mohqcalls";
 char *db_qtable = "mohqueues";
@@ -77,6 +77,13 @@ static param_export_t mod_parms [] = {
   { NULL, 0, NULL },
 };
 
+/* MI COMMANDS */
+static mi_export_t mi_cmds [] = {
+  { "debug", mi_debug, 0, 0, 0 },
+  { "drop_call", mi_drop_call, 0, 0, 0 },
+  { 0, 0, 0, 0, 0 }
+};
+
 /* MODULE EXPORTS */
 struct module_exports exports = {
   "mohqueue",       /* module name */
@@ -84,7 +91,7 @@ struct module_exports exports = {
   mod_cmds,         /* exported functions */
   mod_parms,        /* exported parameters */
   0,                /* statistics */
-  0,                /* MI functions */
+  mi_cmds,          /* MI functions */
   0,                /* exported pseudo-variables */
   0,                /* extra processes */
   mod_init,         /* module initialization function */

@@ -40,6 +40,7 @@
 #include "../../str.h"
 
 #include "../../lib/kcore/cmpapi.h"
+#include "../../lib/kmi/mi.h"
 #include "../../lib/srdb1/db.h"
 #include "../../mem/mem.h"
 #include "../../mem/shm_mem.h"

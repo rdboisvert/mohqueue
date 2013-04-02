@@ -60,6 +60,7 @@ void delete_call_rec (call_lst *);
 db1_con_t *mohq_dbconnect (void);
 void mohq_dbdisconnect (db1_con_t *);
 void update_call_rec (call_lst *);
+void update_debug (mohq_lst *, int);
 void update_mohq_lst (db1_con_t *pconn);
 
 #endif /* MOHQ_DB_H */

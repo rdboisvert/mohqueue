@@ -41,9 +41,12 @@
 **********/
 
 str p100rel [1] = {STR_STATIC_INIT ("100rel")};
+str pallq [1] = {STR_STATIC_INIT ("*")};
 str paudio [1] = {STR_STATIC_INIT ("audio")};
 str pbye [1] = {STR_STATIC_INIT ("BYE")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
+str pmi_nolock [1] = {STR_STATIC_INIT ("Unable to lock queue")};
+str pmi_noqueue [1] = {STR_STATIC_INIT ("No matching queue name found")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str presp_noaccept [1] = {STR_STATIC_INIT ("Not Acceptable Here")};
 str presp_noallow [1] = {STR_STATIC_INIT ("Method Not Allowed")};
@@ -517,10 +520,13 @@ void close_call (sip_msg_t *pmsg, call_lst *pcall)
 **********/
 
 char *pfncname = "close_call: ";
-if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+if (pmsg != FAKED_REPLY)
   {
-  LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
-    pfncname, pcall->call_from);
+  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+    {
+    LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
+      pfncname, pcall->call_from);
+    }
   }
 
 /**********
@@ -801,10 +807,11 @@ return;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
+*   Arg (2) = call pointer
 * OUTPUT: none
 **********/
 
-void deny_method (sip_msg_t *pmsg)
+void deny_method (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -827,6 +834,8 @@ if (ptm->t_newtran (pmsg) < 0)
   }
 if (!add_lump_rpl2 (pmsg, pallowhdr->s, pallowhdr->len, LUMP_RPL_HDR))
   { LM_ERR ("%sUnable to add Allow header!", pfncname); }
+LM_ERR ("%sRefused %.*s for call (%s)!", pfncname,
+  STR_FMT (&REQ_LINE (pmsg).method), pcall->call_from);
 if (ptm->t_reply (pmsg, 405, presp_noallow->s) < 0)
   {
   LM_ERR ("%sUnable to create reply to %.*s!", pfncname,
@@ -853,10 +862,13 @@ void drop_call (sip_msg_t *pmsg, call_lst *pcall)
 **********/
 
 char *pfncname = "drop_call: ";
-if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+if (pmsg != FAKED_REPLY)
   {
-  LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
-    pfncname, pcall->call_from);
+  if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
+    {
+    LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
+      pfncname, pcall->call_from);
+    }
   }
 delete_call (pcall);
 return;
@@ -1301,6 +1313,8 @@ static void
 char *pfncname = "hold_cb: ";
 call_lst *pcall = (call_lst *)*pcbp->param;
 int nreply;
+if (pcbp->rpl == FAKED_REPLY)
+  { ntype = TMCB_ON_FAILURE; }
 switch (ntype)
   {
   case TMCB_ON_FAILURE:
@@ -1345,6 +1359,8 @@ if (pmod_data->fn_rtp_offer (pcbp->rpl, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_offer refused for call (%s)!",
     pfncname, pcall->call_from);
+  drop_call (pcbp->rpl, pcall);
+  return;
   }
 if (pcall->call_state == CLSTA_NHLDSTRT)
   {
@@ -1369,6 +1385,8 @@ if (pmod_data->fn_rtp_stop_stream (pcbp->rpl, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_stop_stream refused for call (%s)!",
     pfncname, pcall->call_from);
+  drop_call (pcbp->rpl, pcall);
+  return;
   }
 if (refer_call (pcall))
   { return; }
@@ -1740,7 +1758,7 @@ static void refer_cb
 {
 char *pfncname = "refer_cb: ";
 call_lst *pcall = (call_lst *)*pcbp->param;
-if (ntype == TMCB_ON_FAILURE)
+if ((ntype == TMCB_ON_FAILURE) || (pcbp->rpl == FAKED_REPLY))
   {
   LM_ERR ("%sCall (%s) did not respond to REFER", pfncname,
     pcall->call_from);
@@ -2349,6 +2367,125 @@ return pmohfiles;
 }
 
 /**********
+* MI Debug
+*
+* PARAMETERS:
+* queue name = queue to use
+* state = 0=off, <>0=on
+*
+* INPUT:
+*   Arg (1) = command tree pointer
+*   Arg (2) = parms pointer
+* OUTPUT: root pointer
+**********/
+
+struct mi_root *mi_debug (struct mi_root *pcmd_tree, void *parms)
+
+{
+/**********
+* o parm count correct?
+* o find queue
+* o lock queue
+**********/
+
+struct mi_node *pnode = pcmd_tree->node.kids;
+if (!pnode || !pnode->next || pnode->next->next)
+  { return init_mi_tree (400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN); }
+int nq_idx = find_queue (&pnode->value);
+if (nq_idx == -1)
+  { return init_mi_tree (400, pmi_noqueue->s, pmi_noqueue->len); }
+char pint [20];
+int nsize = (pnode->next->value.len >= sizeof (pint))
+  ? sizeof (pint) - 1 : pnode->next->value.len;
+strncpy (pint, pnode->next->value.s, nsize);
+pint [nsize] = '\0';
+int bdebug = atoi (pint) ? 1 : 0;
+if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 5000))
+  { return init_mi_tree (400, pmi_nolock->s, pmi_nolock->len); }
+
+/**********
+* o set flag
+* o update queue table
+* o release lock
+**********/
+
+mohq_lst *pqueue = &pmod_data->pmohq_lst [nq_idx];
+if (bdebug)
+  { pqueue->mohq_flags |= MOHQF_DBG; }
+else
+  { pqueue->mohq_flags &= ~MOHQF_DBG; }
+update_debug (pqueue, bdebug);
+mohq_lock_release (pmod_data->pmohq_lock);
+return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
+}
+
+/**********
+* MI Drop Call
+*
+* PARAMETERS:
+* queue name = queue to use
+* callID = *=all, otherwise callID
+*
+* INPUT:
+*   Arg (1) = command tree pointer
+*   Arg (2) = parms pointer
+* OUTPUT: root pointer
+**********/
+
+struct mi_root *mi_drop_call (struct mi_root *pcmd_tree, void *parms)
+
+{
+/**********
+* o parm count correct?
+* o find queue
+* o lock calls
+**********/
+
+struct mi_node *pnode = pcmd_tree->node.kids;
+if (!pnode || !pnode->next || pnode->next->next)
+  { return init_mi_tree (400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN); }
+int nq_idx = find_queue (&pnode->value);
+if (nq_idx == -1)
+  { return init_mi_tree (400, pmi_noqueue->s, pmi_noqueue->len); }
+if (!mohq_lock_set (pmod_data->pcall_lock, 0, 5000))
+  { return init_mi_tree (400, pmi_nolock->s, pmi_nolock->len); }
+
+/**********
+* o find matching calls
+* o release lock
+**********/
+
+mohq_lst *pqueue = &pmod_data->pmohq_lst [nq_idx];
+int nidx;
+str *pcallid = &pnode->next->value;
+for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
+  {
+  /**********
+  * o call active?
+  * o callID matches?
+  * o close call
+  **********/
+
+  call_lst *pcall = &pmod_data->pcall_lst [nidx];
+  if (!pcall->call_active)
+    { continue; }
+  if (pqueue->mohq_id != pcall->pmohq->mohq_id)
+    { continue; }
+  str tmpstr [1];
+  if (!STR_EQ (*pcallid, *pallq))
+    {
+    tmpstr->s = pcall->call_id;
+    tmpstr->len = strlen (tmpstr->s);
+    if (!STR_EQ (*tmpstr, *pcallid))
+      { continue; }
+    }
+  close_call (FAKED_REPLY, pcall);
+  }
+mohq_lock_release (pmod_data->pcall_lock);
+return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
+}
+
+/**********
 * Count Messages
 *
 * INPUT:
@@ -2572,7 +2709,7 @@ switch (pmsg->REQ_METHOD)
     cancel_msg (pmsg, pcall);
     break;
   default:
-    deny_method (pmsg);
+    deny_method (pmsg, pcall);
     break;
   }
 mohq_lock_release (pmod_data->pmohq_lock);

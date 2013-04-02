@@ -2,9 +2,11 @@ RFC3261, section 12.1.1 requires UAS to copy Record-Route
 
 Need to use via when building messages.
 
+Check to see if any memory leaks.
+
 Should probably respond when caller says BYE after queue says BYE.
 
 Document /etc/shorewall/rules changes.
-ACCEPT  C:$SIP  all     udp     9000,9010:9099
-ACCEPT  fw      all     udp     -       9010:9099
-ACCEPT  all     fw      udp     9010:9099
+ACCEPT	C:$SIP	all	udp	9000,9010:9099
+ACCEPT	fw	all	udp	-	9010:9099
+ACCEPT	all	fw	udp	9010:9099
