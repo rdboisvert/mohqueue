@@ -87,6 +87,7 @@ str pallowhdr [1] = { STR_STATIC_INIT (ALLOWHDR SIPEOL) };
 
 char pbyemsg [] =
   {
+  "%s"
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
@@ -116,6 +117,7 @@ char pinvitesdp [] =
 
 char prefermsg [] =
   {
+  "%s"
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
   "Referred-By: <%.*s>" SIPEOL
@@ -123,6 +125,7 @@ char prefermsg [] =
 
 char preinvitemsg [] =
   {
+  "%s"
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
   ALLOWHDR SIPEOL
@@ -150,6 +153,7 @@ char prtpsdp [] =
 
 void delete_call (call_lst *);
 void drop_call (sip_msg_t *, call_lst *);
+dlg_t *form_dialog (call_lst *, struct to_body *);
 int form_rtp_SDP (str *, call_lst *, char *);
 static void hold_cb (struct cell *, int, struct tmcb_params *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
@@ -358,62 +362,37 @@ int change_hold (call_lst *pcall, int bhold)
 
 {
 /**********
-* form re-INVITE header
-* o find URI/tag in from
-* o find target from contact or from header
-* o calculate size
-* o create buffer
+* create dialog
 **********/
 
 char *pfncname = "change_hold: ";
 tm_api_t *ptm = pmod_data->ptm;
 int nret = 0;
-struct to_body ptob [1];
-parse_to (pcall->call_from,
-  &pcall->call_from [strlen (pcall->call_from) + 1], ptob);
-if (ptob->error != PARSE_OK)
-  {
-  // should never happen
-  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
-  return 0;
-  }
-if (ptob->param_lst)
-  { free_to_params (ptob); }
-struct to_body pcontact [1];
-str ptarget [1];
-if (!*pcall->call_contact)
-  {
-  ptarget->s = ptob->uri.s;
-  ptarget->len = ptob->uri.len;
-  }
-else
-  {
-  parse_to (pcall->call_contact,
-    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
-  if (pcontact->error != PARSE_OK)
-    {
-    // should never happen
-    LM_ERR ("%sInvalid contact (%s) for call (%s)!", pfncname,
-      pcall->call_contact, pcall->call_from);
-    return 0;
-    }
-  if (pcontact->param_lst)
-    { free_to_params (pcontact); }
-  ptarget->s = pcontact->uri.s;
-  ptarget->len = pcontact->uri.len;
-  }
+struct to_body ptob [2];
+dlg_t *pdlg = form_dialog (pcall, ptob);
+if (!pdlg)
+  { return 0; }
+
+/**********
+* form re-INVITE header
+* o calculate size
+* o create buffer
+**********/
+
 char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (preinvitemsg) // re-INVITE template
-  + strlen (pquri); // contact
-dlg_t *pdlg = 0;
+  + strlen (pcall->call_via) // Via
+  + strlen (pquri); // Contact
 char *psdp = 0;
 char *phdr = pkg_malloc (npos1);
 if (!phdr)
   {
   LM_ERR ("%sNo more memory!", pfncname);
-  return 0;
+  goto hold_err;
   }
-sprintf (phdr, preinvitemsg, pquri);
+sprintf (phdr, preinvitemsg,
+  pcall->call_via, // Via
+  pquri); // Contact
 str phdrs [1];
 phdrs->s = phdr;
 phdrs->len = strlen (phdr);
@@ -443,32 +422,6 @@ if (!form_rtp_SDP (pbody, pcall, psdp))
   { goto hold_err; }
 pkg_free (psdp);
 psdp = pbody->s;
-
-/**********
-* create dialog
-**********/
-
-pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
-if (!pdlg)
-  {
-  LM_ERR ("%sNo more memory!", pfncname);
-  goto hold_err;
-  }
-memset (pdlg, 0, sizeof (dlg_t));
-pdlg->loc_seq.value = pcall->call_cseq++;
-pdlg->loc_seq.is_set = 1;
-pdlg->id.call_id.s = pcall->call_id;
-pdlg->id.call_id.len = strlen (pcall->call_id);
-pdlg->id.loc_tag.s = pcall->call_tag;
-pdlg->id.loc_tag.len = strlen (pcall->call_tag);
-pdlg->id.rem_tag.s = ptob->tag_value.s;
-pdlg->id.rem_tag.len = ptob->tag_value.len;
-pdlg->rem_target.s = ptarget->s;
-pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = pquri;
-pdlg->loc_uri.len = strlen (pquri);
-pdlg->rem_uri.s = ptob->uri.s;
-pdlg->rem_uri.len = ptob->uri.len;
 
 /**********
 * send re-INVITE request
@@ -516,7 +469,8 @@ void close_call (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* destroy proxy connection
+* o destroy proxy connection
+* o create dialog
 **********/
 
 char *pfncname = "close_call: ";
@@ -528,93 +482,37 @@ if (pmsg != FAKED_REPLY)
       pfncname, pcall->call_from);
     }
   }
+struct to_body ptob [2];
+dlg_t *pdlg = form_dialog (pcall, ptob);
+if (!pdlg)
+  { goto bye_err; }
+pdlg->state = DLG_CONFIRMED;
 
 /**********
 * form BYE header
-* o find URI/tag in from
-* o find target from contact or from header
 * o calculate size
 * o create buffer
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
-dlg_t *pdlg = 0;
 char *phdr = 0;
 int bsent = 0;
-struct to_body ptob [1];
-parse_to (pcall->call_from,
-  &pcall->call_from [strlen (pcall->call_from) + 1], ptob);
-if (ptob->error != PARSE_OK)
-  {
-  // should never happen
-  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
-  goto bye_err;
-  }
-if (ptob->param_lst)
-  { free_to_params (ptob); }
-struct to_body pcontact [1];
-str ptarget [1];
-if (!*pcall->call_contact)
-  {
-  ptarget->s = ptob->uri.s;
-  ptarget->len = ptob->uri.len;
-  }
-else
-  {
-  parse_to (pcall->call_contact,
-    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
-  if (pcontact->error != PARSE_OK)
-    {
-    // should never happen
-    LM_ERR ("%sInvalid contact (%s) for call (%s)!", pfncname,
-      pcall->call_contact, pcall->call_from);
-    goto bye_err;
-    }
-  if (pcontact->param_lst)
-    { free_to_params (pcontact); }
-  ptarget->s = pcontact->uri.s;
-  ptarget->len = pcontact->uri.len;
-  }
 char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (pbyemsg) // BYE template
-  + strlen (pquri); // contact
+  + strlen (pcall->call_via) // Via
+  + strlen (pquri); // Contact
 phdr = pkg_malloc (npos1);
 if (!phdr)
   {
   LM_ERR ("%sNo more memory!", pfncname);
   goto bye_err;
   }
-sprintf (phdr, pbyemsg, pquri);
+sprintf (phdr, pbyemsg,
+  pcall->call_via, // Via
+  pquri); // Contact
 str phdrs [1];
 phdrs->s = phdr;
 phdrs->len = strlen (phdr);
-
-/**********
-* create dialog
-**********/
-
-pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
-if (!pdlg)
-  {
-  LM_ERR ("%sNo more memory!", pfncname);
-  goto bye_err;
-  }
-memset (pdlg, 0, sizeof (dlg_t));
-pdlg->loc_seq.value = pcall->call_cseq++;
-pdlg->loc_seq.is_set = 1;
-pdlg->id.call_id.s = pcall->call_id;
-pdlg->id.call_id.len = strlen (pcall->call_id);
-pdlg->id.loc_tag.s = pcall->call_tag;
-pdlg->id.loc_tag.len = strlen (pcall->call_tag);
-pdlg->id.rem_tag.s = ptob->tag_value.s;
-pdlg->id.rem_tag.len = ptob->tag_value.len;
-pdlg->rem_target.s = ptarget->s;
-pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
-pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
-pdlg->rem_uri.s = ptob->uri.s;
-pdlg->rem_uri.len = ptob->uri.len;
-pdlg->state = DLG_CONFIRMED;
 
 /**********
 * send BYE request
@@ -714,54 +612,58 @@ else
   }
 
 /**********
-* extract Via
+* extract Via headers
 **********/
 
-hdr_field_t *phdr;
-struct via_body *pvia;
-int npos1 = 0;
-int npos2;
-char *pviabuf;
-int nvia_max = sizeof (pcall->call_via);
-int bovrflow = 0;
-for (phdr = pmsg->h_via1; phdr; phdr = next_sibling_hdr (phdr))
+hdr_field_t *phdr = pmsg->h_via1;
+if (phdr)
   {
-  for (pvia = (struct via_body *)phdr->parsed; pvia; pvia = pvia->next)
+  int npos1 = 0;
+  while ((phdr = next_sibling_hdr (phdr)))
     {
-    /**********
-    * o skip trailing whitespace
-    * o check if overflow
-    **********/
-
-    npos2 = pvia->bsize;
-    pviabuf = pvia->name.s;
-    while (npos2)
+    struct via_body *pvia;
+    char *pviabuf;
+    int bovrflow = 0;
+    int npos2;
+    int nvia_max = sizeof (pcall->call_via);
+    for (pvia = (struct via_body *)phdr->parsed; pvia; pvia = pvia->next)
       {
-      --npos2;
-      if (pviabuf [npos2] == ' ' || pviabuf [npos2] == '\r'
-        || pviabuf [npos2] == '\n' || pviabuf [npos2] == '\t' || pviabuf [npos2] == ',')
-        { continue; }
-      break;
-      }
-    if (npos2 + npos1 >= nvia_max)
-      {
-      LM_WARN ("%sVia buffer overflowed!", pfncname);
-      bovrflow = 1;
-      break;
-      }
+      /**********
+      * o skip trailing whitespace
+      * o check if overflow
+      **********/
 
-    /**********
-    * copy via
-    **********/
+      npos2 = pvia->bsize;
+      pviabuf = pvia->name.s;
+      while (npos2)
+        {
+        --npos2;
+        if (pviabuf [npos2] == ' ' || pviabuf [npos2] == '\r'
+          || pviabuf [npos2] == '\n' || pviabuf [npos2] == '\t' || pviabuf [npos2] == ',')
+          { continue; }
+        break;
+        }
+      if ((npos2 + npos1 + 7) >= nvia_max)
+        {
+        LM_WARN ("%sVia buffer overflowed!", pfncname);
+        bovrflow = 1;
+        break;
+        }
 
-    if (npos1)
-      { pcall->call_via [npos1++] = ','; }
-    strncpy (&pcall->call_via [npos1], pviabuf, npos2);
-    npos1 += npos2;
-    pcall->call_via [npos1] = '\0';
+      /**********
+      * copy via
+      **********/
+
+      strcpy (&pcall->call_via [npos1], "Via: ");
+      npos1 += 5;
+      strncpy (&pcall->call_via [npos1], pviabuf, npos2);
+      npos1 += npos2;
+      strcpy (&pcall->call_via [npos1], SIPEOL);
+      npos1 += 2;
+      }
+    if (bovrflow)
+      { break; }
     }
-  if (bovrflow)
-    { break; }
   }
 
 /**********
@@ -1227,6 +1129,86 @@ return;
 * Form RTP SDP String
 *
 * INPUT:
+*   Arg (1) = call pointer
+*   Arg (2) = to_body [2] pointer
+* OUTPUT: dlg_t * if successful; 0=if not
+**********/
+
+dlg_t *form_dialog (call_lst *pcall, struct to_body *pto_body)
+
+{
+/**********
+* get from/to values
+**********/
+
+char *pfncname = "form_dialog: ";
+struct to_body *ptob = &pto_body [0];
+struct to_body *pcontact = &pto_body [1];
+parse_to (pcall->call_from,
+  &pcall->call_from [strlen (pcall->call_from) + 1], ptob);
+if (ptob->error != PARSE_OK)
+  {
+  // should never happen
+  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
+  return 0;
+  }
+if (ptob->param_lst)
+  { free_to_params (ptob); }
+str ptarget [1];
+if (!*pcall->call_contact)
+  {
+  ptarget->s = ptob->uri.s;
+  ptarget->len = ptob->uri.len;
+  }
+else
+  {
+  parse_to (pcall->call_contact,
+    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
+  if (pcontact->error != PARSE_OK)
+    {
+    // should never happen
+    LM_ERR ("%sInvalid contact (%s) for call (%s)!", pfncname,
+      pcall->call_contact, pcall->call_from);
+    return 0;
+    }
+  if (pcontact->param_lst)
+    { free_to_params (pcontact); }
+  ptarget->s = pcontact->uri.s;
+  ptarget->len = pcontact->uri.len;
+  }
+
+/**********
+* create dialog
+**********/
+
+dlg_t *pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
+if (!pdlg)
+  {
+  LM_ERR ("%sNo more memory!", pfncname);
+  return 0;
+  }
+memset (pdlg, 0, sizeof (dlg_t));
+pdlg->loc_seq.value = pcall->call_cseq++;
+pdlg->loc_seq.is_set = 1;
+pdlg->id.call_id.s = pcall->call_id;
+pdlg->id.call_id.len = strlen (pcall->call_id);
+pdlg->id.loc_tag.s = pcall->call_tag;
+pdlg->id.loc_tag.len = strlen (pcall->call_tag);
+pdlg->id.rem_tag.s = ptob->tag_value.s;
+pdlg->id.rem_tag.len = ptob->tag_value.len;
+pdlg->rem_target.s = ptarget->s;
+pdlg->rem_target.len = ptarget->len;
+pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
+pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
+pdlg->rem_uri.s = ptob->uri.s;
+pdlg->rem_uri.len = ptob->uri.len;
+return pdlg;
+}
+
+/**********
+* Form RTP SDP String
+*
+* INPUT:
 *   Arg (1) = string pointer
 *   Arg (2) = call pointer
 *   Arg (3) = SDP body pointer
@@ -1572,13 +1554,8 @@ if (pcall->call_state != CLSTA_PRACKSTRT)
   }
 
 /**********
-* check RAck
-**********/
-
-// ??? need to check
-
-/**********
-* accept PRACK
+* o check RAck ??? need to check
+* o accept PRACK
 **********/
 
 if (ptm->t_newtran (pmsg) < 0)
@@ -1611,110 +1588,46 @@ int refer_call (call_lst *pcall)
 
 {
 /**********
-* form REFER message
-* o find URI/tag in from
-* o find target from contact or from header
-* o calculate basic size
-* o add Via size
-* o create buffer
+* create dialog
 **********/
 
 char *pfncname = "refer_call: ";
-struct to_body ptob [1];
-parse_to (pcall->call_from,
-  &pcall->call_from [strlen (pcall->call_from) + 1], ptob);
-if (ptob->error != PARSE_OK)
-  {
-  // should never happen
-  LM_ERR ("%sInvalid from URI (%s)!", pfncname, pcall->call_from);
-  return 0;
-  }
-if (ptob->param_lst)
-  { free_to_params (ptob); }
-struct to_body pcontact [1];
-str ptarget [1];
-if (!*pcall->call_contact)
-  {
-  ptarget->s = ptob->uri.s;
-  ptarget->len = ptob->uri.len;
-  }
-else
-  {
-  parse_to (pcall->call_contact,
-    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
-  if (pcontact->error != PARSE_OK)
-    {
-    // should never happen
-    LM_ERR ("%sInvalid contact (%s)!", pfncname, pcall->call_contact);
-    return 0;
-    }
-  if (pcontact->param_lst)
-    { free_to_params (pcontact); }
-  ptarget->s = pcontact->uri.s;
-  ptarget->len = pcontact->uri.len;
-  }
+struct to_body ptob [2];
+dlg_t *pdlg = form_dialog (pcall, ptob);
+if (!pdlg)
+  { return 0; }
+pdlg->state = DLG_CONFIRMED;
+
+/**********
+* form REFER message
+* o calculate basic size
+* o create buffer
+**********/
+
 str puri [1];
 puri->s = pcall->call_referto;
 puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
+  + strlen (pcall->call_via) // Via
   + puri->len // Refer-To
   + ptob->uri.len; // Referred-By
-#if 0 //???
-char *pvia [3];
-if (!pcall->call_via [0])
-  { pvia [0] = pvia [1] = pvia [2] = ""; }
-else
-  {
-  npos1 += strlen (pcall->call_via) + 7;
-  pvia [0] = "Via: ";
-  pvia [1] = pcall->call_via;
-  pvia [2] = SIPEOL;
-  }
-#endif //???
-dlg_t *pdlg = 0;
 char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
   LM_ERR ("%sNo more memory!", pfncname);
-  return 0;
-  }
-sprintf (pbuf, prefermsg,
-  puri->s, // Refer-To
-  STR_FMT (&ptob->uri)); // Referred-By
-
-/**********
-* create dialog
-**********/
-
-int nret = 0;
-pdlg = (dlg_t *)pkg_malloc (sizeof (dlg_t));
-if (!pdlg)
-  {
-  LM_ERR ("%sNo more memory!", pfncname);
   goto refererr;
   }
-memset (pdlg, 0, sizeof (dlg_t));
-pdlg->loc_seq.value = pcall->call_cseq++;
-pdlg->loc_seq.is_set = 1;
-pdlg->id.call_id.s = pcall->call_id;
-pdlg->id.call_id.len = strlen (pcall->call_id);
-pdlg->id.loc_tag.s = pcall->call_tag;
-pdlg->id.loc_tag.len = strlen (pcall->call_tag);
-pdlg->id.rem_tag.s = ptob->tag_value.s;
-pdlg->id.rem_tag.len = ptob->tag_value.len;
-pdlg->rem_target.s = ptarget->s;
-pdlg->rem_target.len = ptarget->len;
-pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
-pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
-pdlg->rem_uri.s = ptob->uri.s;
-pdlg->rem_uri.len = ptob->uri.len;
-pdlg->state = DLG_CONFIRMED;
+sprintf (pbuf, prefermsg,
+  pcall->call_via, // Via
+  puri->s, // Refer-To
+  STR_FMT (&ptob->uri)); // Referred-By
 
 /**********
 * send REFER request
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
+int nret = 0;
 uac_req_t puac [1];
 str phdrs [1];
 phdrs->s = pbuf;
