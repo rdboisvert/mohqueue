@@ -81,7 +81,7 @@ rtpmap prtpmap [] =
   {0, 0}
   };
 
-rtpmap *pmohfiles [30]; // element cout should be equal or greater than prtpmap
+rtpmap *pmohfiles [30]; // element count should be equal or greater than prtpmap
 
 str pallowhdr [1] = { STR_STATIC_INIT (ALLOWHDR SIPEOL) };
 
@@ -2700,11 +2700,17 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   if (!pcall->call_active || pcall->call_state != CLSTA_INQUEUE)
     { continue; }
   if (!ntime)
-    { nfound = ncall_idx; }
+    {
+    nfound = ncall_idx;
+    ntime = pcall->call_time;
+    }
   else
     {
     if (pcall->call_time < ntime)
-      { nfound = ncall_idx; }
+      {
+      nfound = ncall_idx;
+      ntime = pcall->call_time;
+      }
     }
   }
 if (nfound == -1)

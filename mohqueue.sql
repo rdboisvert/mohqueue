@@ -21,5 +21,3 @@ CREATE TABLE mohqcalls (
   call_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
   CONSTRAINT mohqcalls_idx UNIQUE (call_id)
 );
-
-INSERT INTO mohqueues (name, uri, mohdir, mohfile, debug) values ('test','sip:9001@10.211.64.5','/var/build/MOH','HeWillCall',1);
