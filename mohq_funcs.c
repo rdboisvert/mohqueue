@@ -174,10 +174,10 @@ int start_stream (sip_msg_t *, call_lst *, int);
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void ack_msg (sip_msg_t *pmsg, call_lst *pcall)
+int ack_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -200,7 +200,7 @@ if (pcall->call_state != CLSTA_INVITED)
     mohq_debug (pcall->pmohq, "%sACK from refused re-INVITE (%s)!",
       pfncname, pcall->call_from);
     }
-  return;
+  return 0;
   }
 
 /**********
@@ -213,6 +213,7 @@ if (ptm->t_lookup_ident (&ptrans, pcall->call_hash, pcall->call_label) < 0)
   {
   LM_ERR ("%sINVITE transaction missing for call (%s)!",
     pfncname, pcall->call_from);
+  return 0;
   }
 else
   {
@@ -220,6 +221,7 @@ else
     {
     LM_ERR ("%sRelease transaction failed for call (%s)!",
       pfncname, pcall->call_from);
+    return 0;
     }
   }
 pcall->call_hash = pcall->call_label = 0;
@@ -232,7 +234,7 @@ pcall->call_cseq = 1;
 mohq_debug (pcall->pmohq,
   "%sACK received for call (%s); placed in queue (%s)",
   pfncname, pcall->call_from, pcall->pmohq->mohq_name);
-return;
+return 1;
 }
 
 /**********
@@ -285,10 +287,10 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void bye_msg (sip_msg_t *pmsg, call_lst *pcall)
+int bye_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -302,6 +304,7 @@ if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply to call (%s)", pfncname,
     pcall->call_from);
+  return 0;
   }
 if (pcall->call_state >= CLSTA_INQUEUE)
   { drop_call (pmsg, pcall); }
@@ -310,8 +313,9 @@ else
   LM_ERR ("%sEnding call (%s) before placed in queue!",
     pfncname, pcall->call_from);
   delete_call (pcall);
+  return 0;
   }
-return;
+return 1;
 }
 
 /**********
@@ -320,10 +324,10 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void cancel_msg (sip_msg_t *pmsg, call_lst *pcall)
+int cancel_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -337,16 +341,22 @@ if (pcall->call_state < CLSTA_INQUEUE)
   mohq_debug (pcall->pmohq, "%sCANCELed call (%s)",
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 487, presp_reqterm) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
+    {
+    LM_ERR ("%sUnable to create reply!", pfncname);
+    return 0;
+    }
   }
 else
   {
   LM_ERR ("%sUnable to CANCEL because accepted INVITE for call (%s)!",
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
-    { LM_ERR ("%sUnable to create reply!", pfncname); }
+    {
+    LM_ERR ("%sUnable to create reply!", pfncname);
+    return 0;
+    }
   }
-return;
+return 1;
 }
 
 /**********
@@ -972,10 +982,10 @@ return -1;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue index
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void first_invite_msg (sip_msg_t *pmsg, int mohq_idx)
+int first_invite_msg (sip_msg_t *pmsg, int mohq_idx)
 
 {
 /**********
@@ -993,7 +1003,7 @@ if (ptm->t_newtran (pmsg) < 0)
     pfncname, STR_FMT (&pmsg->callid->body));
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 if (!(pmsg->msg_flags & FL_SDP_BODY))
   {
@@ -1003,7 +1013,7 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
       STR_FMT (&pmsg->callid->body));
     if (ptm->t_reply (pmsg, 606, "INVITE lacks SDP") < 0)
       { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
-    return;
+    return 0;
     }
   }
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
@@ -1012,7 +1022,7 @@ if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
     pfncname, STR_FMT (&pmsg->callid->body));
   if (ptm->t_reply (pmsg, 500, presp_srverr->s) < 0)
     { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
-  return;
+  return 0;
   }
 
 /**********
@@ -1026,11 +1036,11 @@ if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
     pfncname, STR_FMT (&pmsg->callid->body));
   if (ptm->t_reply (pmsg, 500, presp_srverr->s) < 0)
     { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
-  return;
+  return 0;
   }
 int ncall_idx = create_call (mohq_idx, pmsg, ptotag);
 if (ncall_idx == -1)
-  { return; }
+  { return 0; }
 
 /**********
 * o catch failures
@@ -1050,13 +1060,13 @@ if (ptm->register_tmcb (pmsg, 0, TMCB_ON_FAILURE | TMCB_DESTROY,
   if (ptm->t_reply (pmsg, 500, presp_srverr->s) < 0)
     { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
   delete_call (pcall);
-  return;
+  return 0;
   }
 if (ptm->t_reply (pmsg, 100, "Your call is important to us") < 0)
   {
   LM_ERR ("%sUnable to reply to INVITE!", pfncname);
   delete_call (pcall);
-  return;
+  return 0;
   }
 str pcontact [1];
 char *pcontacthdr = "Contact: <%s>" SIPEOL;
@@ -1066,7 +1076,7 @@ if (!pcontact->s)
   {
   LM_ERR ("%sNo more memory!", pfncname);
   delete_call (pcall);
-  return;
+  return 0;
   }
 sprintf (pcontact->s, pcontacthdr, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
 pcontact->len = strlen (pcontact->s);
@@ -1086,13 +1096,16 @@ if (search_hdr_ext (pmsg->supported, p100rel)
   if (!send_prov_rsp (pmsg, pcall))
     {
     delete_call (pcall);
-    return;
+    return 0;
     }
   }
 else
   {
   if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
-    { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
+    {
+    LM_ERR ("%sUnable to reply to INVITE!", pfncname);
+    return 0;
+    }
   else
     {
     pcall->call_state = CLSTA_RINGING;
@@ -1114,15 +1127,16 @@ if (pcall->call_state == CLSTA_CANCEL)
       pfncname, pcall->call_from);
     }
   delete_call (pcall);
-  return;
+  return 0;
   }
 if (!send_rtp_answer (pmsg, pcall))
   {
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
   delete_call (pcall);
+  return 0;
   }
-return;
+return 1;
 }
 
 /**********
@@ -1417,10 +1431,10 @@ switch (pcall->call_state)
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void notify_msg (sip_msg_t *pmsg, call_lst *pcall)
+int notify_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -1434,7 +1448,7 @@ if (pcall->call_state != CLSTA_RFRWAIT)
     pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 
 /**********
@@ -1449,7 +1463,7 @@ if (!search_hdr_ext (pmsg->content_type, psipfrag))
     psipfrag->s, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 415, presp_unsupp) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 char *pfrag = get_body (pmsg);
 if (!pfrag)
@@ -1458,7 +1472,7 @@ if (!pfrag)
     psipfrag->s, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 415, presp_unsupp) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 str pbody [1];
 pbody->len = pmsg->len - (int)(pfrag - pmsg->buf);
@@ -1466,7 +1480,7 @@ pbody->s = pkg_malloc (pbody->len + 2);
 if (!pbody->s)
   {
   LM_ERR ("%sNo more memory!", pfncname);
-  return;
+  return 0;
   }
 strncpy (pbody->s, pfrag, pbody->len);
 if (pbody->s [pbody->len - 1] != '\n')
@@ -1482,7 +1496,7 @@ if (pstart->type != SIP_REPLY)
   LM_ERR ("%sReply missing for call (%s)!", pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 415, presp_unsupp) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 
 /**********
@@ -1494,7 +1508,7 @@ if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply for call (%s)!",
     pfncname, pcall->call_from);
-  return;
+  return 0;
   }
 int nreply = pstart->u.reply.statuscode;
 mohq_debug (pcall->pmohq, "%sNOTIFY received reply (%d) for call (%s)",
@@ -1515,7 +1529,7 @@ switch (nreply / 100)
       **********/
 
       drop_call (pmsg, pcall);
-      return;
+      return 0;
       }
     if (!change_hold (pcall, 0))
       {
@@ -1524,7 +1538,7 @@ switch (nreply / 100)
       }
     break;
   }
-return;
+return 1;
 }
 
 /**********
@@ -1533,10 +1547,10 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void prack_msg (sip_msg_t *pmsg, call_lst *pcall)
+int prack_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -1550,7 +1564,7 @@ if (pcall->call_state != CLSTA_PRACKSTRT)
   LM_ERR ("%sUnexpected PRACK (%s)!", pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 481, presp_nocall) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 
 /**********
@@ -1564,16 +1578,16 @@ if (ptm->t_newtran (pmsg) < 0)
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 if (ptm->t_reply (pmsg, 200, presp_ok->s) < 0)
   {
   LM_ERR ("%sUnable to reply to PRACK for call (%s)!",
     pfncname, pcall->call_from);
-  return;
+  return 0;
   }
 pcall->call_state = CLSTA_PRACKRPLY;
-return;
+return 1;
 }
 
 /**********
@@ -1701,10 +1715,10 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-* OUTPUT: none
+* OUTPUT: 0=failed
 **********/
 
-void reinvite_msg (sip_msg_t *pmsg, call_lst *pcall)
+int reinvite_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
@@ -1720,7 +1734,7 @@ if ((pcall->call_state / 100) < 2)
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 491, presp_reqpend) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return;
+  return 0;
   }
 if (!(pmsg->msg_flags & FL_SDP_BODY))
   {
@@ -1729,7 +1743,7 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     LM_ERR ("%sre-INVITE lacks SDP (%s)!", pfncname, pcall->call_from);
     if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
       { LM_ERR ("%sUnable to create reply!", pfncname); }
-    return;
+    return 0;
     }
   }
 
@@ -1802,16 +1816,22 @@ if (!bhold)
     LM_ERR ("%sre-INVITE refused because no matching payload for call (%s)!",
       pfncname, pcall->call_from);
     if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
-      { LM_ERR ("%sUnable to create reply!", pfncname); }
+      {
+      LM_ERR ("%sUnable to create reply!", pfncname);
+      return 0;
+      }
     }
   else
     {
     mohq_debug (pcall->pmohq, "%sAccepted re-INVITE for call (%s)",
       pfncname, pcall->call_from);
     if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
-      { LM_ERR ("%sUnable to create reply!", pfncname); }
+      {
+      LM_ERR ("%sUnable to create reply!", pfncname);
+      return 0;
+      }
     }
-  return;
+  return 1;
   }
 
 /**********
@@ -1821,9 +1841,12 @@ if (!bhold)
 LM_ERR ("%sTerminating call (%s) because hold not allowed!",
   pfncname, pcall->call_from);
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
-  { LM_ERR ("%sUnable to create reply!", pfncname); }
+  {
+  LM_ERR ("%sUnable to create reply!", pfncname);
+  return 0;
+  }
 close_call (pmsg, pcall);
-return;
+return 1;
 }
 
 /**********
@@ -2536,7 +2559,7 @@ return;
 *
 * INPUT:
 *   Arg (1) = SIP message pointer
-* OUTPUT: -1=not directed to queue; 0=exit script
+* OUTPUT: -1=not directed to queue; 1=successfully processed
 **********/
 
 int mohq_process (sip_msg_t *pmsg)
@@ -2594,6 +2617,7 @@ mohq_debug (&pmod_data->pmohq_lst [mohq_idx],
   "%sProcessing %.*s, queue (%s)", pfncname,
   STR_FMT (&REQ_LINE (pmsg).method),
   pmod_data->pmohq_lst [mohq_idx].mohq_name);
+int ret;
 switch (pmsg->REQ_METHOD)
   {
   case METHOD_INVITE:
@@ -2602,31 +2626,32 @@ switch (pmsg->REQ_METHOD)
     **********/
 
     if (!pcall)
-      { first_invite_msg (pmsg, mohq_idx); }
+      { ret = first_invite_msg (pmsg, mohq_idx); }
     else
-      { reinvite_msg (pmsg, pcall); }
+      { ret = reinvite_msg (pmsg, pcall); }
     break;
   case METHOD_NOTIFY:
-    notify_msg (pmsg, pcall);
+    ret = notify_msg (pmsg, pcall);
     break;
   case METHOD_PRACK:
-    prack_msg (pmsg, pcall);
+    ret = prack_msg (pmsg, pcall);
     break;
   case METHOD_ACK:
-    ack_msg (pmsg, pcall);
+    ret = ack_msg (pmsg, pcall);
     break;
   case METHOD_BYE:
-    bye_msg (pmsg, pcall);
+    ret = bye_msg (pmsg, pcall);
     break;
   case METHOD_CANCEL:
-    cancel_msg (pmsg, pcall);
+    ret = cancel_msg (pmsg, pcall);
     break;
   default:
     deny_method (pmsg, pcall);
+    ret = 0;
     break;
   }
 mohq_lock_release (pmod_data->pmohq_lock);
-return 0;
+return ret ? 1 : -1;
 }
 
 /**********
@@ -2754,7 +2779,7 @@ return -1;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue name
-* OUTPUT: -1 if no items in queue; 0 if successfull
+* OUTPUT: -1 if no items in queue; 1 if successfull
 **********/
 
 int mohq_send (sip_msg_t *pmsg, pv_elem_t *pqueue)
@@ -2817,5 +2842,5 @@ if (pmod_data->ptm->t_relay (pmsg, 0, 0) < 0)
   LM_ERR ("%sUnable to relay INVITE!", pfncname);
   return -1;
   }
-return 0;
+return 1;
 }
