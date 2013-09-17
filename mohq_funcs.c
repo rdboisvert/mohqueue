@@ -2661,7 +2661,7 @@ return ret ? 1 : -1;
 *   Arg (1) = SIP message pointer
 *   Arg (2) = queue name
 *   Arg (3) = redirect URI
-* OUTPUT: -1 if no items in queue; else redirects oldest call
+* OUTPUT: -1 if no items in queue or error; 1 redirects oldest call
 **********/
 
 int mohq_retrieve (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
@@ -2758,12 +2758,12 @@ pcall->call_referto [puri->len] = '\0';
 if (change_hold (pcall, 1))
   {
   mohq_lock_release (pmod_data->pcall_lock);
-  return -1;
+  return 1;
   }
 mohq_lock_release (pmod_data->pcall_lock);
 LM_ERR ("%sUnable to put call (%s) on hold!", pfncname, pcall->call_from);
 if (refer_call (pcall))
-  { return -1; }
+  { return 1; }
 LM_ERR ("%sUnable to refer call (%s)!", pfncname, pcall->call_from);
 if (!change_hold (pcall, 0))
   {
