@@ -322,7 +322,6 @@ void mod_destroy (void)
 * o deallocate shared mem
 **********/
 
-LM_INFO ("???module destroy");//???
 if (!pmod_data)
   { return; }
 if (pmod_data->pmohq_lock->plock)
@@ -430,7 +429,6 @@ if (!mohq_lock_init (pmod_data->pmohq_lock))
   { goto initerr; }
 if (!mohq_lock_init (pmod_data->pcall_lock))
   { goto initerr; }
-LM_INFO ("module initialized");//???
 return 0;
 
 /**********

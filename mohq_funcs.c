@@ -1658,8 +1658,8 @@ if (ptm->t_request_within (puac) < 0)
   update_call_rec (pcall);
   goto refererr;
   }
-mohq_debug (pcall->pmohq, "%sSent REFER request for call (%s)",
-  pfncname, pcall->call_from);
+mohq_debug (pcall->pmohq, "%sSent REFER request for call (%s) to %s",
+  pfncname, pcall->call_from, pcall->call_referto);
 nret = -1;
 
 refererr:
@@ -2719,10 +2719,22 @@ call_lst *pcall = 0;
 int ncall_idx;
 time_t ntime = 0;
 int nfound = -1;
+int mohq_id = pmod_data->pmohq_lst [nq_idx].mohq_id;
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   {
+  /**********
+  * o active call?
+  * o matching queue?
+  * o in queue?
+  * o check age
+  **********/
+
   pcall = &pmod_data->pcall_lst [ncall_idx];
-  if (!pcall->call_active || pcall->call_state != CLSTA_INQUEUE)
+  if (!pcall->call_active)
+    { continue; }
+  if (pcall->pmohq->mohq_id != mohq_id)
+    { continue; }
+  if (pcall->call_state != CLSTA_INQUEUE)
     { continue; }
   if (!ntime)
     {
