@@ -408,14 +408,6 @@ if (!pmod_data->fn_rtp_stream_s)
   LM_ERR ("Unable to load rtpproxy_stream2uas");
   goto initerr;
   }
-#if 0 //???
-pmod_data->fn_rtp_stop_stream = find_export ("rtpproxy_stop_stream2uac", 0, 0);
-if (!pmod_data->fn_rtp_stop_stream)
-  {
-  LM_ERR ("Unable to load rtpproxy_stop_stream2uac");
-  goto initerr;
-  }
-#endif
 pmod_data->fn_rtp_destroy = find_export ("rtpproxy_destroy", 0, 0);
 if (!pmod_data->fn_rtp_destroy)
   {

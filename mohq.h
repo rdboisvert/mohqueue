@@ -69,16 +69,8 @@ typedef struct
 #define CLSTA_INVITED   104
 #define CLSTA_CANCEL    105
 #define CLSTA_INQUEUE   200
-#if 0 //???
-#define CLSTA_HLDSTRT   301
-#define CLSTA_REFER     302
-#define CLSTA_RFRWAIT   303
-#define CLSTA_NHLDSTRT  304
-#else
 #define CLSTA_REFER     301
 #define CLSTA_RFRWAIT   302
-//#define CLSTA_RFRRING   303
-#endif
 #define CLSTA_BYE       305
 
 typedef struct
@@ -128,7 +120,6 @@ typedef struct
   cmd_function fn_rtp_offer;
   cmd_function fn_rtp_stream_c;
   cmd_function fn_rtp_stream_s;
-//???  cmd_function fn_rtp_stop_stream;
   } mod_data;
 
 /**********
