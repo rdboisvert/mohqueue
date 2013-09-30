@@ -155,9 +155,11 @@ void delete_call (call_lst *);
 void drop_call (sip_msg_t *, call_lst *);
 dlg_t *form_dialog (call_lst *, struct to_body *);
 int form_rtp_SDP (str *, call_lst *, char *);
+#if 0 //???
 static void hold_cb (struct cell *, int, struct tmcb_params *);
+#endif
 static void invite_cb (struct cell *, int, struct tmcb_params *);
-int refer_call (call_lst *);
+int refer_call (call_lst *, mohq_lock *);
 static void refer_cb (struct cell *, int, struct tmcb_params *);
 int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
@@ -359,6 +361,7 @@ else
 return 1;
 }
 
+#if 0 //???
 /**********
 * Change Hold
 *
@@ -465,6 +468,7 @@ if (psdp)
 pkg_free (phdr);
 return nret;
 }
+#endif
 
 /**********
 * Close the Call
@@ -486,6 +490,8 @@ void close_call (sip_msg_t *pmsg, call_lst *pcall)
 char *pfncname = "close_call: ";
 if (pmsg != FAKED_REPLY)
   {
+  mohq_debug (pcall->pmohq, "%sDestroying RTP link for call (%s)",
+    pfncname, pcall->call_from);
   if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
     {
     LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
@@ -776,6 +782,8 @@ void drop_call (sip_msg_t *pmsg, call_lst *pcall)
 char *pfncname = "drop_call: ";
 if (pmsg != FAKED_REPLY)
   {
+  mohq_debug (pcall->pmohq, "%sDestroying RTP link for call (%s)",
+    pfncname, pcall->call_from);
   if (pmod_data->fn_rtp_destroy (pmsg, 0, 0) != 1)
     {
     LM_ERR ("%srtpproxy_destroy refused for call (%s)!",
@@ -1016,6 +1024,8 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     return 0;
     }
   }
+LM_DBG ("%sMaking offer for RTP link for call (%.*s)",
+  pfncname, STR_FMT (&pmsg->callid->body));
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_offer refused for call (%.*s)!",
@@ -1292,6 +1302,7 @@ pstr->len = nsize;
 return 1;
 }
 
+#if 0 //???
 /**********
 * Hold Callback
 *
@@ -1351,6 +1362,8 @@ switch (ntype)
 * o hold off?
 **********/
 
+mohq_debug (pcall->pmohq, "%sMaking offer for RTP link for call (%s)",
+  pfncname, pcall->call_from);
 if (pmod_data->fn_rtp_offer (pcbp->rpl, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_offer refused for call (%s)!",
@@ -1377,6 +1390,8 @@ if (pcall->call_state == CLSTA_NHLDSTRT)
 * o take call off hold
 **********/
 
+mohq_debug (pcall->pmohq, "%sStopping RTP link for call (%s)",
+  pfncname, pcall->call_from);
 if (pmod_data->fn_rtp_stop_stream (pcbp->rpl, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_stop_stream refused for call (%s)!",
@@ -1394,6 +1409,7 @@ if (!change_hold (pcall, 0))
   }
 return;
 }
+#endif
 
 /**********
 * Invite Callback
@@ -1442,7 +1458,12 @@ int notify_msg (sip_msg_t *pmsg, call_lst *pcall)
 **********/
 
 char *pfncname = "notify_msg: ";
+#if 0 //???
+if (pcall->call_state != CLSTA_RFRWAIT
+  && pcall->call_state != CLSTA_RFRRING)
+#else
 if (pcall->call_state != CLSTA_RFRWAIT)
+#endif
   {
   LM_ERR ("%sNot waiting on a REFER for call (%s)!", pfncname,
     pcall->call_from);
@@ -1516,12 +1537,42 @@ mohq_debug (pcall->pmohq, "%sNOTIFY received reply (%d) for call (%s)",
 switch (nreply / 100)
   {
   case 1:
+#if 0 //???
+    if (nreply == 180 && pcall->call_state == CLSTA_RFRWAIT)
+      {
+      /**********
+      * o send RTP offer
+      * o stop streaming
+      * o change state to ringing
+      **********/
+
+      mohq_debug (pcall->pmohq, "%sMaking offer for RTP link for call (%s)",
+        pfncname, pcall->call_from);
+      if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
+        {
+        LM_ERR ("%srtpproxy_offer refused for call (%s)!",
+          pfncname, pcall->call_from);
+        drop_call (pmsg, pcall);
+        break;
+        }
+      mohq_debug (pcall->pmohq, "%sStopping RTP link for call (%s)",
+        pfncname, pcall->call_from);
+      if (pmod_data->fn_rtp_stop_stream (pmsg, 0, 0) == 1)
+        { pcall->call_state = CLSTA_RFRRING; }
+      else
+        {
+        LM_ERR ("%srtpproxy_stop_stream refused for call (%s)!",
+          pfncname, pcall->call_from);
+        drop_call (pmsg, pcall);
+        }
+      }
+#endif
     break;
   case 2:
     close_call (pmsg, pcall);
     break;
   default:
-    LM_ERR ("%sUnable to redirect call (%s)!", pfncname, pcall->call_from);
+    LM_WARN ("%sUnable to redirect call (%s)!", pfncname, pcall->call_from);
     if (nreply == 487)
       {
       /**********
@@ -1531,11 +1582,30 @@ switch (nreply / 100)
       drop_call (pmsg, pcall);
       return 0;
       }
+#if 0 //???
+
+    /**********
+    * o return call to queue
+    * o start streaming
+    **********/
+
+    pcall->call_state = CLSTA_INQUEUE;
+    update_call_rec (pcall);
+    start_stream (pmsg, pcall, 1);
     if (!change_hold (pcall, 0))
       {
       pcall->call_state = CLSTA_INQUEUE;
       update_call_rec (pcall);
       }
+#else
+
+    /**********
+    * return call to queue
+    **********/
+
+    pcall->call_state = CLSTA_INQUEUE;
+    update_call_rec (pcall);
+#endif
     break;
   }
 return 1;
@@ -1595,10 +1665,11 @@ return 1;
 *
 * INPUT:
 *   Arg (1) = call pointer
+*   Arg (2) = lock pointer
 * OUTPUT: 0 if failed
 **********/
 
-int refer_call (call_lst *pcall)
+int refer_call (call_lst *pcall, mohq_lock *plock)
 
 {
 /**********
@@ -1609,7 +1680,10 @@ char *pfncname = "refer_call: ";
 struct to_body ptob [2];
 dlg_t *pdlg = form_dialog (pcall, ptob);
 if (!pdlg)
-  { return 0; }
+  {
+  mohq_lock_release (plock);
+  return 0;
+  }
 pdlg->state = DLG_CONFIRMED;
 
 /**********
@@ -1650,6 +1724,7 @@ set_uac_req (puac, prefer, phdrs, 0, pdlg,
   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, refer_cb, pcall);
 pcall->call_state = CLSTA_REFER;
 update_call_rec (pcall);
+mohq_lock_release (plock);
 if (ptm->t_request_within (puac) < 0)
   {
   pcall->call_state = CLSTA_INQUEUE;
@@ -2098,6 +2173,8 @@ memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 * o send stream
 **********/
 
+mohq_debug (pcall->pmohq, "%sAnswering RTP link for call (%s)",
+  pfncname, pcall->call_from);
 if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
   {
   LM_ERR ("%srtpproxy_answer refused for call (%s)!",
@@ -2193,6 +2270,7 @@ return nret;
 int start_stream (sip_msg_t *pmsg, call_lst *pcall, int bserver)
 
 {
+char *pfncname = "start_stream: ";
 char pfile [MOHDIRLEN + MOHFILELEN + 2];
 strcpy (pfile, pcall->pmohq->mohq_mohdir);
 int npos = strlen (pfile);
@@ -2204,10 +2282,12 @@ pv_elem_t *pmodel;
 pv_parse_format (pMOH, &pmodel);
 cmd_function fn_stream = bserver ? pmod_data->fn_rtp_stream_s
   : pmod_data->fn_rtp_stream_c;
+mohq_debug (pcall->pmohq, "%sStarting RTP link for call (%s)",
+  pfncname, pcall->call_from);
 if (fn_stream (pmsg, (char *)pmodel, (char *)-1) != 1)
   {
-  LM_ERR ("start_stream: rtpproxy_stream refused for call (%s)!",
-    pcall->call_from);
+  LM_ERR ("%srtpproxy_stream refused for call (%s)!",
+    pfncname, pcall->call_from);
   return 0;
   }
 return 1;
@@ -2760,28 +2840,21 @@ pcall = &pmod_data->pcall_lst [nfound];
 
 /**********
 * o save refer-to URI
-* o put call on hold
 * o send refer
-* o take call off hold
 **********/
 
 strncpy (pcall->call_referto, puri->s, puri->len);
 pcall->call_referto [puri->len] = '\0';
-if (change_hold (pcall, 1))
-  {
-  mohq_lock_release (pmod_data->pcall_lock);
-  return 1;
-  }
-mohq_lock_release (pmod_data->pcall_lock);
-LM_ERR ("%sUnable to put call (%s) on hold!", pfncname, pcall->call_from);
-if (refer_call (pcall))
+if (refer_call (pcall, pmod_data->pcall_lock))
   { return 1; }
 LM_ERR ("%sUnable to refer call (%s)!", pfncname, pcall->call_from);
+#if 0 // ???
 if (!change_hold (pcall, 0))
   {
   pcall->call_state = CLSTA_INQUEUE;
   update_call_rec (pcall);
   }
+#endif
 return -1;
 }
 
