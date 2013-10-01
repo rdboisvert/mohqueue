@@ -375,6 +375,8 @@ void close_call (sip_msg_t *pmsg, call_lst *pcall)
 **********/
 
 char *pfncname = "close_call: ";
+int bsent = 0;
+char *phdr = 0;
 if (pmsg != FAKED_REPLY)
   {
   mohq_debug (pcall->pmohq, "%sDestroying RTP link for call (%s)",
@@ -398,8 +400,6 @@ pdlg->state = DLG_CONFIRMED;
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
-char *phdr = 0;
-int bsent = 0;
 char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (pbyemsg) // BYE template
   + strlen (pcall->call_via) // Via
@@ -1214,7 +1214,7 @@ switch (pcall->call_state)
     break;
   case CLSTA_INVITED:
     LM_ERR ("%sINVITE failed for call (%s)!", pfncname, pcall->call_from);
-    drop_call (pcbp->req, pcall);
+    close_call (FAKED_REPLY, pcall);
     break;
   }
 }
