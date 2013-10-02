@@ -2237,7 +2237,7 @@ return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
 * OUTPUT: -1 if no items in queue; else result = count
 **********/
 
-int mohq_count (sip_msg_t *pmsg, pv_elem_t *pqueue, char *presult)
+int mohq_count (sip_msg_t *pmsg, char *pqueue, pv_spec_t *presult)
 
 {
 /**********
@@ -2245,34 +2245,15 @@ int mohq_count (sip_msg_t *pmsg, pv_elem_t *pqueue, char *presult)
 **********/
 
 char *pfncname = "mohq_count: ";
-str pavp [1], pqname [1];
+str pqname [1];
 if (!pqueue || !presult)
   {
   LM_ERR ("%sParameters missing!", pfncname);
   return -1;
   }
-if (pv_printf_s (pmsg, pqueue, pqname))
+if (fixup_get_svalue (pmsg, (gparam_p)pqueue, pqname))
   {
-  LM_ERR ("%sUnable to extract queue name!", pfncname);
-  return -1;
-  }
-
-/**********
-* o pv provided?
-* o create pv if not exist
-**********/
-
-pavp->s = presult;
-pavp->len = strlen (presult);
-if (!pavp->len)
-  {
-  LM_ERR ("%sResult pv name missing!", pfncname);
-  return -1;
-  }
-pv_spec_t *pavp_spec = pv_cache_get (pavp);
-if (!pavp_spec)
-  {
-  LM_ERR ("%sUnable to create pv (%.*s)!", pfncname, STR_FMT (pavp));
+  LM_ERR ("%sInvalid queue name!", pfncname);
   return -1;
   }
 
@@ -2314,9 +2295,9 @@ pv_value_t pavp_val [1];
 memset (pavp_val, 0, sizeof (pv_value_t));
 pavp_val->ri = ncount;
 pavp_val->flags = PV_TYPE_INT | PV_VAL_INT;
-if (pv_set_spec_value (0, pavp_spec, 0, pavp_val) < 0)
+if (presult->setf (pmsg, &presult->pvp, (int)EQ_T, pavp_val) < 0)
   {
-  LM_ERR ("%sUnable to set pv value (%.*s)!", pfncname, STR_FMT (pavp));
+  LM_ERR ("%sUnable to set pv value for mohq_count ()!", pfncname);
   return -1;
   }
 return 1;
@@ -2470,7 +2451,7 @@ return ret ? 1 : -1;
 * OUTPUT: -1 if no items in queue or error; 1 redirects oldest call
 **********/
 
-int mohq_retrieve (sip_msg_t *pmsg, pv_elem_t *pqueue, pv_elem_t *pURI)
+int mohq_retrieve (sip_msg_t *pmsg, char *pqueue, char *pURI)
 
 {
 /**********
@@ -2485,14 +2466,14 @@ if (!pqueue || !pURI)
   LM_ERR ("%sParameters missing!", pfncname);
   return -1;
   }
-if (pv_printf_s (pmsg, pqueue, pqname))
+if (fixup_get_svalue (pmsg, (gparam_p)pqueue, pqname))
   {
-  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  LM_ERR ("%sInvalid queue name!", pfncname);
   return -1;
   }
-if (pv_printf_s (pmsg, pURI, puri))
+if (fixup_get_svalue (pmsg, (gparam_p)pURI, puri))
   {
-  LM_ERR ("%sUnable to extract URI!", pfncname);
+  LM_ERR ("%sInvalid URI!", pfncname);
   return -1;
   }
 if (puri->len > URI_LEN)
@@ -2586,7 +2567,7 @@ return -1;
 * OUTPUT: -1 if no items in queue; 1 if successfull
 **********/
 
-int mohq_send (sip_msg_t *pmsg, pv_elem_t *pqueue)
+int mohq_send (sip_msg_t *pmsg, char *pqueue)
 
 {
 /**********
@@ -2612,9 +2593,9 @@ if (!pqueue)
   LM_ERR ("%sParameters missing!", pfncname);
   return -1;
   }
-if (pv_printf_s (pmsg, pqueue, pqname))
+if (fixup_get_svalue (pmsg, (gparam_p)pqueue, pqname))
   {
-  LM_ERR ("%sUnable to extract queue name!", pfncname);
+  LM_ERR ("%sInvalid queue name!", pfncname);
   return -1;
   }
 
