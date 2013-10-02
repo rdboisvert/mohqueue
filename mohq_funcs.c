@@ -1535,7 +1535,7 @@ if ((pcall->call_state / 100) < 2)
     pfncname, pcall->call_from);
   if (pmod_data->psl->freply (pmsg, 491, presp_reqpend) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
-  return 0;
+  return 1;
   }
 if (!(pmsg->msg_flags & FL_SDP_BODY))
   {
@@ -1544,7 +1544,7 @@ if (!(pmsg->msg_flags & FL_SDP_BODY))
     LM_ERR ("%sre-INVITE lacks SDP (%s)!", pfncname, pcall->call_from);
     if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
       { LM_ERR ("%sUnable to create reply!", pfncname); }
-    return 0;
+    return 1;
     }
   }
 
@@ -1619,7 +1619,7 @@ if (!bhold)
     if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
       {
       LM_ERR ("%sUnable to create reply!", pfncname);
-      return 0;
+      return 1;
       }
     }
   else
@@ -1629,7 +1629,7 @@ if (!bhold)
     if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
       {
       LM_ERR ("%sUnable to create reply!", pfncname);
-      return 0;
+      return 1;
       }
     }
   return 1;
@@ -1644,7 +1644,7 @@ LM_ERR ("%sTerminating call (%s) because hold not allowed!",
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply!", pfncname);
-  return 0;
+  return 1;
   }
 close_call (pmsg, pcall);
 return 1;
