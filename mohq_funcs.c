@@ -153,6 +153,7 @@ char prtpsdp [] =
 
 void delete_call (call_lst *);
 void drop_call (sip_msg_t *, call_lst *);
+int find_call (sip_msg_t *, call_lst **);
 dlg_t *form_dialog (call_lst *, struct to_body *);
 int form_rtp_SDP (str *, call_lst *, char *);
 static void invite_cb (struct cell *, int, struct tmcb_params *);
@@ -464,14 +465,22 @@ int create_call (int mohq_idx, sip_msg_t *pmsg)
 {
 /**********
 * o lock calls
+* o already in use?
 * o find inactive slot
 **********/
 
 char *pfncname = "create_call: ";
-int ncall_idx = pmod_data->call_cnt;
 if (!mohq_lock_set (pmod_data->pcall_lock, 1, 2000))
   {
   LM_ERR ("%sUnable to lock calls!", pfncname);
+  return -1;
+  }
+call_lst *pcall;
+int ncall_idx = find_call (pmsg, &pcall);
+if (pcall)
+  {
+  mohq_lock_release (pmod_data->pcall_lock);
+  LM_ERR ("%sCall already in use (%s)!", pfncname, pcall->call_from);
   return -1;
   }
 for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
@@ -487,13 +496,11 @@ if (ncall_idx == pmod_data->call_cnt)
   }
 
 /**********
-* o release call lock
-* o add values to new entry
+* add values to new entry
 **********/
 
-call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
+pcall = &pmod_data->pcall_lst [ncall_idx];
 pcall->call_active = 1;
-mohq_lock_release (pmod_data->pcall_lock);
 pcall->pmohq = &pmod_data->pmohq_lst [mohq_idx];
 pcall->call_state = 0;
 str *pstr = &pmsg->callid->body;
@@ -568,11 +575,13 @@ if (phdr)
   }
 
 /**********
+* o release call lock
 * o update DB
 * o lock MOH queue
 **********/
 
 pcall->call_state = CLSTA_ENTER;
+mohq_lock_release (pmod_data->pcall_lock);
 add_call_rec (ncall_idx);
 mohq_lock_set (pmod_data->pmohq_lock, 0, 0);
 mohq_debug (pcall->pmohq, "%sAdded call (%s) to queue (%s)",
@@ -729,28 +738,19 @@ if (nqidx == pmod_data->mohq_cnt)
 
 /**********
 * o get to tag
-* o first INVITE?
 * o get callID
 * o ignore to tag if CANCEL on first INVITE
 * o search call queue
 **********/
 
 str *ptotag = &(get_to (pmsg)->tag_value);
-if (pmsg->REQ_METHOD == METHOD_INVITE)
-  {
-  if (!ptotag->len)
-    { return nqidx; }
-  }
+if (!ptotag->len)
+  { ptotag = 0; }
 if (!pmsg->callid)
   { return -1; }
 str *pcallid = &pmsg->callid->body;
 if (!pcallid)
   { return -1; }
-if (pmsg->REQ_METHOD == METHOD_CANCEL)
-  {
-  if (!ptotag->len)
-    { ptotag = 0; }
-  }
 for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   {
   /**********
@@ -777,6 +777,16 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
     }
   *ppcall = pcall;
   return nqidx;
+  }
+
+/**********
+* first INVITE?
+**********/
+
+if (pmsg->REQ_METHOD == METHOD_INVITE)
+  {
+  if (!ptotag->len)
+    { return 0; }
   }
 return -1;
 }
@@ -1043,7 +1053,7 @@ return 1;
 }
 
 /**********
-* Form RTP SDP String
+* Form Dialog
 *
 * INPUT:
 *   Arg (1) = call pointer
@@ -2280,7 +2290,7 @@ int nq_idx = find_queue (pqname);
 int ncount = 0;
 call_lst *pcalls = pmod_data->pcall_lst;
 int ncall_idx, mohq_id;
-if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
+if (!mohq_lock_set (pmod_data->pcall_lock, 0, 200))
   { LM_ERR ("%sUnable to lock calls!", pfncname); }
 else
   {
@@ -2517,7 +2527,7 @@ if (parse_uri (puri->s, puri->len, puri_parsed))
 int nq_idx = find_queue (pqname);
 if (nq_idx == -1)
   { return -1; }
-if (!mohq_lock_set (pmod_data->pcall_lock, 1, 200))
+if (!mohq_lock_set (pmod_data->pcall_lock, 0, 200))
   {
   LM_ERR ("%sUnable to lock calls!", pfncname);
   return -1;
