@@ -37,7 +37,7 @@ Valid request
 <!--
 take ring and then quit
 -->
-  <recv response="180" optional="true"/>
+  <recv response="180"/>
 
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
 

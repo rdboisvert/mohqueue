@@ -28,7 +28,7 @@ Send packet with no SDP
 <!--
 expecting this failure
 -->
-  <recv response="404" optional="true"/>
+  <recv response="404"/>
 
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
 
