@@ -7,5 +7,3 @@ Things to look into:
 * Should probably respond when caller says BYE after queue says BYE.
 
 * check RAck number
-
-* check Require header for unsupported values
