@@ -265,7 +265,7 @@ if (ntype == TMCB_ON_FAILURE)
   }
 else
   {
-  int nreply = pcbp->rpl->first_line.u.reply.statuscode;
+  int nreply = pcbp->code;
   if ((nreply / 100) != 2)
     {
     LM_ERR ("%sCall (%s) BYE error (%d)", pfncname,
@@ -601,13 +601,36 @@ void delete_call (call_lst *pcall)
 
 {
 /**********
-* o clear transaction data
+* release transaction
+**********/
+
+char *pfncname = "delete_call: ";
+struct cell *ptrans;
+tm_api_t *ptm = pmod_data->ptm;
+if (pcall->call_hash || pcall->call_label)
+  {
+  if (ptm->t_lookup_ident (&ptrans, pcall->call_hash, pcall->call_label) < 0)
+    {
+    LM_ERR ("%sLookup transaction failed for call (%s)!", pfncname,
+      pcall->call_from);
+    }
+  else
+    {
+    if (ptm->t_release (pcall->call_pmsg) < 0)
+      {
+      LM_ERR ("%sRelease transaction failed for call (%s)!",
+        pfncname, pcall->call_from);
+      }
+    }
+  pcall->call_hash = pcall->call_label = 0;
+  }
+
+/**********
 * o update DB
 * o inactivate slot
 * o release MOH queue
 **********/
 
-pcall->call_hash = pcall->call_label = 0;
 mohq_debug (pcall->pmohq, "delete_call: Deleting call (%s) from queue (%s)",
   pcall->call_from, pcall->pmohq->mohq_name);
 delete_call_rec (pcall);
@@ -784,10 +807,7 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
 **********/
 
 if (pmsg->REQ_METHOD == METHOD_INVITE)
-  {
-  if (!ptotag->len)
-    { return 0; }
-  }
+  { return 0; }
 return -1;
 }
 
@@ -1003,13 +1023,12 @@ if (!add_lump_rpl2 (pmsg, pcontact->s, pcontact->len, LUMP_RPL_HDR))
   }
 pkg_free (pcontact->s);
 pcall->call_pmsg = pmsg;
-if (search_hdr_ext (pmsg->supported, p100rel)
-  || search_hdr_ext (pmsg->require, p100rel))
+if (search_hdr_ext (pmsg->require, p100rel))
   {
   if (!send_prov_rsp (pmsg, pcall))
     {
     delete_call (pcall);
-    return 0;
+    return 1;
     }
   }
 else
@@ -1017,7 +1036,7 @@ else
   if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
     {
     LM_ERR ("%sUnable to reply to INVITE!", pfncname);
-    return 0;
+    return 1;
     }
   else
     {
@@ -1028,26 +1047,14 @@ else
   }
 
 /**********
-* o call cancelled?
-* o accept call with RTP
+* accept call with RTP
 **********/
 
-if (pcall->call_state == CLSTA_CANCEL)
-  {
-  if (ptm->t_release (pmsg) < 0)
-    {
-    LM_ERR ("%sRelease transaction failed for call (%s)!",
-      pfncname, pcall->call_from);
-    }
-  delete_call (pcall);
-  return 0;
-  }
 if (!send_rtp_answer (pmsg, pcall))
   {
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
     { LM_ERR ("%sUnable to create reply!", pfncname); }
   delete_call (pcall);
-  return 0;
   }
 return 1;
 }
@@ -1516,7 +1523,7 @@ if ((ntype == TMCB_ON_FAILURE) || (pcbp->req == FAKED_REPLY))
   drop_call (pcbp->req, pcall);
   return;
   }
-int nreply = pcbp->rpl->first_line.u.reply.statuscode;
+int nreply = pcbp->code;
 if ((nreply / 100) == 2)
   {
   pcall->call_state = CLSTA_RFRWAIT;
