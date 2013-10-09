@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
-<scenario name="no PRACK response">
-<!--
-Valid request
--->
+<scenario name="ACK no ringing response">
   <send retrans="500">
     <![CDATA[
 
@@ -17,8 +14,7 @@ Valid request
       Contact: sip:sipp@[local_ip]:[local_port]
       Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER
       Max-Forwards: 70
-      Subject: No PRACK response
-      Supported: 100rel
+      Subject: ACK no ringing response
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -35,36 +31,7 @@ Valid request
 
   <recv response="100" optional="true"/>
 
-<!--
-Extract RSeq
--->
-  <recv response="180">
-    <action>
-      <ereg regexp="\<.+\>" search_in="hdr" header="Contact:" check_it="true" assign_to="1"/>
-      <ereg regexp=".*" search_in="hdr" header="RSeq:" check_it="true" assign_to="2"/>
-    </action>
-  </recv>
-
-<!--
-Valid request
--->
-  <send retrans="500">
-    <![CDATA[
-
-      PRACK [$1] SIP/2.0
-      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
-      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
-      Call-ID: [call_id]
-      CSeq: 2 PRACK
-      Contact: sip:sipp@[local_ip]:[local_port]
-      Max-Forwards: 70
-      Subject: No PRACK response
-      RAck: [$2] 1 INVITE
-      Content-Length: [len]
-
-    ]]>
-  </send>
+  <recv response="180"/>
 
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
 

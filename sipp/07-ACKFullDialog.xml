@@ -2,9 +2,6 @@
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
 <scenario name="ACK Full Dialog">
-<!--
-Valid request
--->
   <send retrans="500" start_txn="invite">
     <![CDATA[
 
@@ -42,9 +39,6 @@ Valid request
 
   <recv response="200" response_txn="invite"/>
 
-<!--
-Valid ACK request
--->
   <send ack_txn="invite">
     <![CDATA[
 

@@ -2,9 +2,6 @@
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
 <scenario name="no REFER">
-<!--
-Send packet with no REFER
--->
   <send retrans="500">
     <![CDATA[
 
@@ -34,9 +31,6 @@ Send packet with no REFER
 
   <recv response="100" optional="true"/>
 
-<!--
-expecting this failure
--->
   <recv response="404"/>
 
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>

@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
-<scenario name="no ACK response">
-<!--
-Valid request
--->
+<scenario name="PRACK no ACK response">
   <send retrans="500">
     <![CDATA[
 
@@ -17,8 +14,8 @@ Valid request
       Contact: sip:sipp@[local_ip]:[local_port]
       Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, ACK, UPDATE, REFER
       Max-Forwards: 70
-      Subject: No ACK response
-      Supported: 100rel
+      Subject: PRACK no ACK response
+      Require: 100rel
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -35,9 +32,6 @@ Valid request
 
   <recv response="100" optional="true"/>
 
-<!--
-Extract RSeq
--->
   <recv response="180">
     <action>
       <ereg regexp="\<.+\>" search_in="hdr" header="Contact:" check_it="true" assign_to="1"/>
@@ -45,9 +39,6 @@ Extract RSeq
     </action>
   </recv>
 
-<!--
-Valid PRACK request
--->
   <send retrans="500" start_txn="prack">
     <![CDATA[
 
@@ -59,7 +50,7 @@ Valid PRACK request
       CSeq: 2 PRACK
       Contact: sip:sipp@[local_ip]:[local_port]
       Max-Forwards: 70
-      Subject: No ACK response
+      Subject: PRACK no ACK response
       RAck: [$2] 1 INVITE
       Content-Length: [len]
 

@@ -2,9 +2,6 @@
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
 <scenario name="PRACK Full Dialog">
-<!--
-Valid request
--->
   <send retrans="500" start_txn="invite">
     <![CDATA[
 
@@ -18,7 +15,7 @@ Valid request
       Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, ACK, UPDATE, REFER
       Max-Forwards: 70
       Subject: PRACK Full Dialog
-      Supported: 100rel
+      Require: 100rel
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -35,9 +32,6 @@ Valid request
 
   <recv response="100" response_txn="invite" optional="true"/>
 
-<!--
-Extract RSeq
--->
   <recv response="180" response_txn="invite">
     <action>
       <ereg regexp="\<.+\>" search_in="hdr" header="Contact:" check_it="true" assign_to="1"/>
@@ -45,9 +39,6 @@ Extract RSeq
     </action>
   </recv>
 
-<!--
-Valid PRACK request
--->
   <send retrans="500" start_txn="prack">
     <![CDATA[
 
@@ -70,9 +61,6 @@ Valid PRACK request
 
   <recv response="200" response_txn="invite"/>
 
-<!--
-Valid ACK request
--->
   <send ack_txn="invite">
     <![CDATA[
 

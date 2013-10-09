@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
-<scenario name="no Ringing response">
-<!--
-Valid request
--->
+<scenario name="Cancel Invite">
   <send retrans="500">
     <![CDATA[
 
@@ -15,9 +12,10 @@ Valid request
       Call-ID: [call_id]
       CSeq: 1 INVITE
       Contact: sip:sipp@[local_ip]:[local_port]
-      Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, PRACK, UPDATE, REFER
+      Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, INFO, MESSAGE, SUBSCRIBE, NOTIFY, ACK, UPDATE, REFER
       Max-Forwards: 70
-      Subject: No Ringing response
+      Subject: Cancel Invite
+      Require: 100rel
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -34,10 +32,30 @@ Valid request
 
   <recv response="100" optional="true"/>
 
-<!--
-take ring and then quit
--->
-  <recv response="180"/>
+  <recv response="180">
+    <action>
+      <ereg regexp="\<.+\>" search_in="hdr" header="Contact:" check_it="true" assign_to="1"/>
+    </action>
+  </recv>
+
+  <send start_txn="cancel">
+    <![CDATA[
+
+      CANCEL [$1] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 CANCEL
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: Cancel Invite
+      Content-Length: [len]
+
+    ]]>
+  </send>
+
+  <recv response="487" response_txn="cancel"/>
 
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
 
