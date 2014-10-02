@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * Copyright (C) 2013 Robert Boisvert
+ * Copyright (C) 2013-14 Robert Boisvert
  *
  * This file is part of the mohqueue module for sip-router, a free SIP server.
  *
@@ -70,7 +70,7 @@ int moh_maxcalls = 50;
 static param_export_t mod_parms [] = {
   { "db_url", STR_PARAM, &db_url },
   { "db_ctable", STR_PARAM, &db_ctable },
-  { "db_ctable", STR_PARAM, &db_qtable },
+  { "db_qtable", STR_PARAM, &db_qtable },
   { "mohdir", STR_PARAM, &mohdir },
   { "moh_maxcalls", INT_PARAM, &moh_maxcalls },
   { NULL, 0, NULL },
