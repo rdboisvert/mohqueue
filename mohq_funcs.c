@@ -1035,32 +1035,17 @@ if (search_hdr_ext (pmsg->require, p100rel))
     delete_call (pcall);
     return 1;
     }
-  }
-else
-  {
-  if (ptm->t_reply (pmsg, 180, presp_ring->s) < 0)
+  if (pcall->call_state == CLSTA_CANCEL)
     {
-    LM_ERR ("%sUnable to reply to INVITE!", pfncname);
+    delete_call (pcall);
     return 1;
-    }
-  else
-    {
-    pcall->call_state = CLSTA_RINGING;
-    mohq_debug (pcall->pmohq, "%sSent RINGING for call (%s)",
-      pfncname, pcall->call_from);
     }
   }
 
 /**********
-* o call cancelled?
-* o accept call with RTP
+* accept call with RTP
 **********/
 
-if (pcall->call_state == CLSTA_CANCEL)
-  {
-  delete_call (pcall);
-  return 1;
-  }
 if (!send_rtp_answer (pmsg, pcall))
   {
   if (pmod_data->psl->freply (pmsg, 500, presp_srverr) < 0)
