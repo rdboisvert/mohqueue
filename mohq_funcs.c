@@ -295,25 +295,35 @@ int bye_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o send OK
-* o teardown call
+* o responded?
+* o teardown RTP
 **********/
 
 char *pfncname = "bye_msg: ";
+if (pcall->call_state == CLSTA_BYEOK)
+  { return 1; }
+if (pcall->call_state >= CLSTA_INQUEUE)
+  {
+  pcall->call_state = CLSTA_BYEOK;
+  drop_call (pmsg, pcall);
+  }
+else
+  {
+  LM_ERR ("%sEnding call (%s) before placed in queue!",
+    pfncname, pcall->call_from);
+  }
+
+/**********
+* send OK and delete from queue
+**********/
+
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply to call (%s)", pfncname,
     pcall->call_from);
   return 1;
   }
-if (pcall->call_state >= CLSTA_INQUEUE)
-  { drop_call (pmsg, pcall); }
-else
-  {
-  LM_ERR ("%sEnding call (%s) before placed in queue!",
-    pfncname, pcall->call_from);
-  delete_call (pcall);
-  }
+delete_call (pcall);
 return 1;
 }
 
@@ -621,15 +631,15 @@ if (pcall->call_hash || pcall->call_label)
 
 /**********
 * o update DB
+* o release call lock
 * o inactivate slot
-* o release MOH queue
 **********/
 
 mohq_debug (pcall->pmohq, "delete_call: Deleting call (%s) from queue (%s)",
   pcall->call_from, pcall->pmohq->mohq_name);
 delete_call_rec (pcall);
+mohq_lock_release (pmod_data->pcall_lock);
 pcall->call_active = 0;
-mohq_lock_release (pmod_data->pmohq_lock);
 return;
 }
 
@@ -688,8 +698,7 @@ void drop_call (sip_msg_t *pmsg, call_lst *pcall)
 
 {
 /**********
-* o destroy proxy connection
-* o delete call
+* destroy proxy connection
 **********/
 
 char *pfncname = "drop_call: ";
@@ -703,7 +712,6 @@ if (pmsg != FAKED_REPLY)
       pfncname, pcall->call_from);
     }
   }
-delete_call (pcall);
 return;
 }
 
@@ -924,7 +932,7 @@ int first_invite_msg (sip_msg_t *pmsg, int mohq_idx)
 char *pfncname = "first_invite_msg: ";
 int ncall_idx = create_call (mohq_idx, pmsg);
 if (ncall_idx == -1)
-  { return 0; }
+  { return 1; }
 call_lst *pcall = &pmod_data->pcall_lst [ncall_idx];
 
 /**********
@@ -1334,6 +1342,7 @@ switch (nreply / 100)
       **********/
 
       drop_call (pmsg, pcall);
+      delete_call (pcall);
       return 1;
       }
 
@@ -1502,6 +1511,7 @@ if ((ntype == TMCB_ON_FAILURE) || (pcbp->req == FAKED_REPLY))
   LM_ERR ("%sCall (%s) did not respond to REFER", pfncname,
     pcall->call_from);
   drop_call (pcbp->req, pcall);
+  delete_call (pcall);
   return;
   }
 int nreply = pcbp->code;
@@ -2341,7 +2351,7 @@ void mohq_debug (mohq_lst *pmohq, char *pfmt, ...)
 **********/
 
 #ifdef LOG_MNAME_LEN
-int nsys_log = get_debug_level (MOD_NAME, sizeof (MOD_NAME) - 1));
+int nsys_log = get_debug_level (MOD_NAME, sizeof (MOD_NAME) - 1);
 #else
 int nsys_log = get_debug_level ();
 #endif

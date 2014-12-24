@@ -71,6 +71,7 @@ typedef struct
 #define CLSTA_INQUEUE   200
 #define CLSTA_REFER     301
 #define CLSTA_RFRWAIT   302
+#define CLSTA_BYEOK     304
 #define CLSTA_BYE       305
 
 typedef struct
