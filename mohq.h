@@ -63,11 +63,12 @@ typedef struct
 
 /* call_state values */
 #define CLSTA_ENTER     100
-#define CLSTA_PRACKSTRT 101
-#define CLSTA_PRACKRPLY 102
-#define CLSTA_RINGING   103
-#define CLSTA_INVITED   104
-#define CLSTA_CANCEL    105
+#define CLSTA_RTPSTART  101
+#define CLSTA_PRACKSTRT 102
+#define CLSTA_PRACKRPLY 103
+#define CLSTA_RINGING   104
+#define CLSTA_INVITED   105
+#define CLSTA_CANCEL    106
 #define CLSTA_INQUEUE   200
 #define CLSTA_REFER     301
 #define CLSTA_RFRWAIT   302
@@ -76,7 +77,6 @@ typedef struct
 
 typedef struct
   {
-  int call_active;
   char call_id [101];
   char call_from [URI_LEN + 1];
   char call_referto [URI_LEN + 1];
