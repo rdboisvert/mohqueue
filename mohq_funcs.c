@@ -452,11 +452,13 @@ return;
 * INPUT:
 *   Arg (1) = SIP message pointer
 *   Arg (2) = call pointer
-*   Arg (3) = queue index
+*   Arg (3) = call index
+*   Arg (4) = queue index
 * OUTPUT: initializes call record
 **********/
 
-void create_call (sip_msg_t *pmsg, call_lst *pcall, int mohq_idx)
+void
+create_call (sip_msg_t *pmsg, call_lst *pcall, int ncall_idx, int mohq_idx)
 
 {
 /**********
@@ -769,7 +771,7 @@ if (nopen < 0)
   return 0;
   }
 pcall = &pmod_data->pcall_lst [nopen];
-create_call (pmsg, pcall, mohq_idx);
+create_call (pmsg, pcall, nopen, mohq_idx);
 return pcall;
 }
 
@@ -1013,8 +1015,8 @@ if (ptm->register_tmcb (pmsg, 0, TMCB_DESTROY | TMCB_ON_FAILURE,
 
 str pcontact [1];
 char *pcontacthdr = "Contact: <%s>" SIPEOL;
-pcontact->s = pkg_malloc (strlen (pmod_data->pmohq_lst [mohq_idx].mohq_uri)
-  + strlen (pcontacthdr));
+pcontact->s
+  = pkg_malloc (strlen (pcall->pmohq->mohq_uri) + strlen (pcontacthdr));
 if (!pcontact->s)
   {
   LM_ERR ("%sNo more memory!", pfncname);
@@ -1022,7 +1024,7 @@ if (!pcontact->s)
   delete_call (pcall);
   return;
   }
-sprintf (pcontact->s, pcontacthdr, pmod_data->pmohq_lst [mohq_idx].mohq_uri);
+sprintf (pcontact->s, pcontacthdr, pcall->pmohq->mohq_uri);
 pcontact->len = strlen (pcontact->s);
 if (!add_lump_rpl2 (pmsg, pcontact->s, pcontact->len, LUMP_RPL_HDR))
   {
