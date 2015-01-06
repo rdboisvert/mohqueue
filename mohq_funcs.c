@@ -48,6 +48,7 @@ str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
 str pmi_nolock [1] = {STR_STATIC_INIT ("Unable to lock queue")};
 str pmi_noqueue [1] = {STR_STATIC_INIT ("No matching queue name found")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
+str presp_busy [1] = {STR_STATIC_INIT ("Busy Here")};
 str presp_noaccept [1] = {STR_STATIC_INIT ("Not Acceptable Here")};
 str presp_noallow [1] = {STR_STATIC_INIT ("Method Not Allowed")};
 str presp_nocall [1] = {STR_STATIC_INIT ("Call/Transaction Does Not Exist")};
@@ -57,6 +58,7 @@ str presp_reqterm [1] = {STR_STATIC_INIT ("Request Terminated")};
 str presp_ring [1] = {STR_STATIC_INIT ("Ringing")};
 str psipfrag [1] = {STR_STATIC_INIT ("message/sipfrag")};
 str presp_srverr [1] = {STR_STATIC_INIT ("Server Internal Error")};
+str presp_trying [1] = {STR_STATIC_INIT ("Trying to enter MOH queue")};
 str presp_unsupp [1] = {STR_STATIC_INIT ("Unsupported Media Type")};
 
 rtpmap prtpmap [] =
@@ -721,7 +723,6 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   * o call timed out on ACK?
   * o callID matches?
   * o to tag matches?
-  * o return call pointer
   **********/
 
   pcall = &pmod_data->pcall_lst [nidx];
@@ -752,6 +753,15 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
     tmpstr->len = strlen (tmpstr->s);
     if (!STR_EQ (*tmpstr, *ptotag))
       { continue; }
+    }
+  else
+    {
+    /**********
+    * match not allowed for INVITE
+    **********/
+
+    if (pmsg->REQ_METHOD == METHOD_INVITE)
+      { return 0; }
     }
   return pcall;
   }
@@ -923,17 +933,23 @@ return -1;
 void first_invite_msg (sip_msg_t *pmsg, call_lst *pcall)
 
 {
+char *pfncname = "first_invite_msg: ";
+
 /**********
 * o SDP exists?
 * o accepts REFER?
 * o send RTP offer
 **********/
 
-char *pfncname = "first_invite_msg: ";
 if (!(pmsg->msg_flags & FL_SDP_BODY))
   {
   if (parse_sdp (pmsg))
     {
+    if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+      {
+      LM_ERR ("%sUnable to create reply!", pfncname);
+      return;
+      }
     LM_ERR ("%sINVITE lacks SDP (%s) from queue (%s)!",
       pfncname, pcall->call_from, pcall->pmohq->mohq_name);
     delete_call (pcall);
@@ -944,6 +960,11 @@ if (pmsg->allow)
   {
   if (!search_hdr_ext (pmsg->allow, prefer))
     {
+    if (pmod_data->psl->freply (pmsg, 488, presp_noaccept) < 0)
+      {
+      LM_ERR ("%sUnable to create reply!", pfncname);
+      return;
+      }
     LM_ERR ("%sMissing REFER support (%s) from queue (%s)!",
       pfncname, pcall->call_from, pcall->pmohq->mohq_name);
     delete_call (pcall);
@@ -955,12 +976,16 @@ mohq_debug (pcall->pmohq,
   pfncname, pcall->call_from, pcall->pmohq->mohq_name);
 if (pmod_data->fn_rtp_offer (pmsg, 0, 0) != 1)
   {
+  if (pmod_data->psl->freply (pmsg, 486, presp_busy) < 0)
+    {
+    LM_ERR ("%sUnable to create reply!", pfncname);
+    return;
+    }
   LM_ERR ("%srtpproxy_offer refused for call (%s)!",
       pfncname, pcall->call_from);
   delete_call (pcall);
   return;
   }
-pcall->call_state = CLSTA_RTPSTART;
 
 /**********
 * o create new transaction
@@ -1006,6 +1031,19 @@ if (ptm->register_tmcb (pmsg, 0, TMCB_DESTROY | TMCB_ON_FAILURE,
   delete_call (pcall);
   return;
   }
+
+/**********
+* reply with trying
+**********/
+
+if (ptm->t_reply (pmsg, 100, presp_trying->s) < 0)
+  {
+  LM_ERR ("%sUnable to create reply!", pfncname);
+  end_RTP (pmsg, pcall);
+  delete_call (pcall);
+  return;
+  }
+pcall->call_state = CLSTA_TRYING;
 
 /**********
 * o add contact to reply
@@ -2430,7 +2468,7 @@ int mohq_idx = find_queue (pmsg);
 if (mohq_idx < 0)
   {
   mohq_lock_release (pmod_data->pmohq_lock);
-  return 1;
+  return -1;
   }
 if (!mohq_lock_set (pmod_data->pcall_lock, 1, 500))
   {
@@ -2455,6 +2493,7 @@ mohq_debug (&pmod_data->pmohq_lst [mohq_idx],
   "%sProcessing %.*s, queue (%s)", pfncname,
   STR_FMT (&REQ_LINE (pmsg).method),
   pmod_data->pmohq_lst [mohq_idx].mohq_name);
+str *ptotag;
 switch (pmsg->REQ_METHOD)
   {
   case METHOD_INVITE:
@@ -2462,7 +2501,10 @@ switch (pmsg->REQ_METHOD)
     * initial INVITE?
     **********/
 
-    if (pcall->call_state == CLSTA_ENTER)
+    ptotag = &(get_to (pmsg)->tag_value);
+    if (!ptotag->len)
+      { ptotag = 0; }
+    if (!ptotag)
       { first_invite_msg (pmsg, pcall); }
     else
       { reinvite_msg (pmsg, pcall); }

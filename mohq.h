@@ -63,7 +63,7 @@ typedef struct
 
 /* call_state values */
 #define CLSTA_ENTER     100
-#define CLSTA_RTPSTART  101
+#define CLSTA_TRYING    101
 #define CLSTA_PRACKSTRT 102
 #define CLSTA_PRACKRPLY 103
 #define CLSTA_RINGING   104
