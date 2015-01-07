@@ -122,7 +122,7 @@ char prefermsg [] =
   "%s"
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
-  "Referred-By: <%.*s>" SIPEOL
+  "Referred-By: <%s>" SIPEOL
   "User-Agent: " USRAGNT SIPEOL
   };
 
@@ -1483,7 +1483,7 @@ puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
   + strlen (pcall->call_via) // Via
   + puri->len // Refer-To
-  + ptob->uri.len; // Referred-By
+  + strlen (pcall->pmohq->mohq_uri); // Referred-By
 char *pbuf = pkg_malloc (npos1);
 if (!pbuf)
   {
@@ -1493,7 +1493,7 @@ if (!pbuf)
 sprintf (pbuf, prefermsg,
   pcall->call_via, // Via
   puri->s, // Refer-To
-  STR_FMT (&ptob->uri)); // Referred-By
+  pcall->pmohq->mohq_uri); // Referred-By
 
 /**********
 * send REFER request
