@@ -1367,6 +1367,7 @@ mohq_debug (pcall->pmohq, "%sNOTIFY received reply (%d) for call (%s)",
 switch (nreply / 100)
   {
   case 1:
+    pcall->refer_time = time (0);
     break;
   case 2:
     close_call (pmsg, pcall);
@@ -1506,6 +1507,7 @@ phdrs->s = pbuf;
 phdrs->len = strlen (pbuf);
 set_uac_req (puac, prefer, phdrs, 0, pdlg,
   TMCB_LOCAL_COMPLETED | TMCB_ON_FAILURE, refer_cb, pcall);
+pcall->refer_time = time (0);
 pcall->call_state = CLSTA_REFER;
 update_call_rec (pcall);
 mohq_lock_release (plock);
@@ -1555,6 +1557,7 @@ if ((ntype == TMCB_ON_FAILURE) || (pcbp->req == FAKED_REPLY))
 int nreply = pcbp->code;
 if ((nreply / 100) == 2)
   {
+  pcall->refer_time = time (0);
   pcall->call_state = CLSTA_RFRWAIT;
   mohq_debug (pcall->pmohq, "%sCall (%s) REFER reply=%d",
     pfncname, pcall->call_from, nreply);
@@ -2603,6 +2606,7 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
   /**********
   * o active call?
   * o matching queue?
+  * o refer stuck?
   * o in queue?
   * o check age
   **********/
@@ -2612,6 +2616,17 @@ for (ncall_idx = 0; ncall_idx < pmod_data->call_cnt; ncall_idx++)
     { continue; }
   if (pcall->pmohq->mohq_id != mohq_id)
     { continue; }
+  if ((pcall->call_state == CLSTA_REFER)
+    || (pcall->call_state == CLSTA_RFRWAIT))
+    {
+    if ((pcall->refer_time + 32) < time (0))
+      {
+      LM_ERR
+        ("%sDropping call because no response to REFER for call (%s)",
+        pfncname, pcall->call_from);
+      close_call (FAKED_REPLY, pcall);
+      }
+    }
   if (pcall->call_state != CLSTA_INQUEUE)
     { continue; }
   if (!ntime)
