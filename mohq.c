@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * Copyright (C) 2013-14 Robert Boisvert
+ * Copyright (C) 2013-15 Robert Boisvert
  *
  * This file is part of the mohqueue module for sip-router, a free SIP server.
  *
@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -61,17 +61,17 @@ static cmd_export_t mod_cmds [] = {
 };
 
 /* PARAMETERS */
-char *db_url = DEFAULT_DB_URL;
-char *db_ctable = "mohqcalls";
-char *db_qtable = "mohqueues";
+str db_url = str_init (DEFAULT_DB_URL);
+str db_ctable = str_init ("mohqcalls");
+str db_qtable = str_init ("mohqueues");
 char *mohdir = "";
 int moh_maxcalls = 50;
 
 static param_export_t mod_parms [] = {
-  { "db_url", STR_PARAM, &db_url },
-  { "db_ctable", STR_PARAM, &db_ctable },
-  { "db_qtable", STR_PARAM, &db_qtable },
-  { "mohdir", STR_PARAM, &mohdir },
+  { "db_url", PARAM_STR, &db_url },
+  { "db_ctable", PARAM_STR, &db_ctable },
+  { "db_qtable", PARAM_STR, &db_qtable },
+  { "mohdir", PARAM_STR, &mohdir },
   { "moh_maxcalls", INT_PARAM, &moh_maxcalls },
   { NULL, 0, NULL },
 };
@@ -138,27 +138,24 @@ static int init_cfg (void)
 * db_url, db_ctable, db_qtable exist?
 **********/
 
-if (!*db_url)
+if (!db_url.s || db_url.len <= 0)
   {
   LM_ERR ("db_url parameter not set!");
   return 0;
   }
-pmod_data->pcfg->db_url.s = db_url;
-pmod_data->pcfg->db_url.len = strlen (db_url);
-if (!*db_ctable)
+pmod_data->pcfg->db_url = db_url;
+if (!db_ctable.s || db_ctable.len <= 0)
   {
   LM_ERR ("db_ctable parameter not set!");
   return 0;
   }
-pmod_data->pcfg->db_ctable.s = db_ctable;
-pmod_data->pcfg->db_ctable.len = strlen (db_ctable);
-if (!*db_qtable)
+pmod_data->pcfg->db_ctable = db_ctable;
+if (!db_qtable.s || db_qtable.len <= 0)
   {
   LM_ERR ("db_qtable parameter not set!");
   return 0;
   }
-pmod_data->pcfg->db_qtable.s = db_qtable;
-pmod_data->pcfg->db_qtable.len = strlen (db_qtable);
+pmod_data->pcfg->db_qtable = db_qtable;
 
 /**********
 * mohdir

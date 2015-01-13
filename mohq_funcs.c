@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * Copyright (C) 2013 Robert Boisvert
+ * Copyright (C) 2013-15 Robert Boisvert
  *
  * This file is part of the mohqueue module for sip-router, a free SIP server.
  *
@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -2391,11 +2391,7 @@ void mohq_debug (mohq_lst *pmohq, char *pfmt, ...)
 * o reset log level
 **********/
 
-#ifdef LOG_MNAME_LEN
-int nsys_log = get_debug_level (MOD_NAME, sizeof (MOD_NAME) - 1);
-#else
-int nsys_log = get_debug_level ();
-#endif
+int nsys_log = get_debug_level (LOG_MNAME, LOG_MNAME_LEN);
 int nmohq_log = (pmohq->mohq_flags & MOHQF_DBG) ? L_DBG : L_INFO;
 if (nmohq_log < L_DBG && nsys_log < L_DBG)
   { return; }
