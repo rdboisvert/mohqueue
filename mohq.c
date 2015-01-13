@@ -71,7 +71,7 @@ static param_export_t mod_parms [] = {
   { "db_url", PARAM_STR, &db_url },
   { "db_ctable", PARAM_STR, &db_ctable },
   { "db_qtable", PARAM_STR, &db_qtable },
-  { "mohdir", PARAM_STR, &mohdir },
+  { "mohdir", PARAM_STRING, &mohdir },
   { "moh_maxcalls", INT_PARAM, &moh_maxcalls },
   { NULL, 0, NULL },
 };
