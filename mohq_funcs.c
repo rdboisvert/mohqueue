@@ -240,6 +240,47 @@ return;
 }
 
 /**********
+* Add String to Buffer
+*
+* INPUT:
+*   Arg (1) = string pointer
+*   Arg (2) = string length
+*   Arg (3) = pointer to buffer pointer
+*   Arg (4) = pointer to buffer size
+*   Arg (5) = add NUL flag
+* OUTPUT: =0 if insufficent space
+*   bufpointer incremented, size decremented
+**********/
+
+int addstrbfr (char *pstr, size_t nlen, char **pbuf, size_t *nmax, int bnull)
+
+{
+/**********
+* o enough space?
+* o copy string
+* o adjust position/size
+**********/
+
+size_t nsize = nlen;
+if (bnull)
+  { nsize++; }
+if (nsize > *nmax)
+  { return 0; }
+if (nlen)
+  {
+  strncpy (*pbuf, pstr, nlen);
+  *pbuf += nlen;
+  }
+if (bnull)
+  {
+  **pbuf = '\0';
+  (*pbuf)++;
+  }
+*nmax -= nsize;
+return 1;
+}
+
+/**********
 * BYE Callback
 *
 * INPUT:
@@ -456,10 +497,10 @@ return;
 *   Arg (2) = call pointer
 *   Arg (3) = call index
 *   Arg (4) = queue index
-* OUTPUT: initializes call record
+* OUTPUT: initializes call record; =0 if failed
 **********/
 
-void
+int
 create_call (sip_msg_t *pmsg, call_lst *pcall, int ncall_idx, int mohq_idx)
 
 {
@@ -470,57 +511,56 @@ create_call (sip_msg_t *pmsg, call_lst *pcall, int ncall_idx, int mohq_idx)
 char *pfncname = "create_call: ";
 pcall->pmohq = &pmod_data->pmohq_lst [mohq_idx];
 str *pstr = &pmsg->callid->body;
-strncpy (pcall->call_id, pstr->s, pstr->len);
-pcall->call_id [pstr->len] = '\0';
+char *pbuf = pcall->call_buffer;
+pcall->call_bufpos = sizeof (pcall->call_buffer);
+pcall->call_id = pbuf;
+if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
 pstr = &pmsg->from->body;
-strncpy (pcall->call_from, pstr->s, pstr->len);
-pcall->call_from [pstr->len] = '\0';
-*pcall->call_tag = '\0';
-if (!pmsg->contact)
-  { *pcall->call_contact = '\0'; }
-else
+pcall->call_from = pbuf;
+if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
+pcall->call_tag = pbuf;
+if (!addstrbfr (0, 0, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
+pcall->call_contact = pbuf;
+if (pmsg->contact)
   {
   pstr = &pmsg->contact->body;
-  strncpy (pcall->call_contact, pstr->s, pstr->len);
-  pcall->call_contact [pstr->len] = '\0';
+  if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_bufpos, 0))
+    { return 0; }
   }
+if (!addstrbfr (0, 0, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
 
 /**********
 * extract Via headers
 **********/
 
+pcall->call_via = pbuf;
 hdr_field_t *phdr = pmsg->h_via1;
 if (phdr)
   {
-  int npos1 = 0;
   while ((phdr = next_sibling_hdr (phdr)))
     {
     struct via_body *pvia;
     char *pviabuf;
-    int bovrflow = 0;
-    int npos2;
-    int nvia_max = sizeof (pcall->call_via);
+    int npos;
     for (pvia = (struct via_body *)phdr->parsed; pvia; pvia = pvia->next)
       {
       /**********
-      * o skip trailing whitespace
-      * o check if overflow
+      * skip trailing whitespace
       **********/
 
-      npos2 = pvia->bsize;
+      npos = pvia->bsize;
       pviabuf = pvia->name.s;
-      while (npos2)
+      while (npos)
         {
-        --npos2;
-        if (pviabuf [npos2] == ' ' || pviabuf [npos2] == '\r'
-          || pviabuf [npos2] == '\n' || pviabuf [npos2] == '\t' || pviabuf [npos2] == ',')
+        --npos;
+        if (pviabuf [npos] == ' ' || pviabuf [npos] == '\r'
+          || pviabuf [npos] == '\n' || pviabuf [npos] == '\t'
+          || pviabuf [npos] == ',')
           { continue; }
-        break;
-        }
-      if ((npos2 + npos1 + 7) >= nvia_max)
-        {
-        LM_WARN ("%sVia buffer overflowed!", pfncname);
-        bovrflow = 1;
         break;
         }
 
@@ -528,17 +568,43 @@ if (phdr)
       * copy via
       **********/
 
-      strcpy (&pcall->call_via [npos1], "Via: ");
-      npos1 += 5;
-      strncpy (&pcall->call_via [npos1], pviabuf, npos2);
-      npos1 += npos2;
-      strcpy (&pcall->call_via [npos1], SIPEOL);
-      npos1 += 2;
+      if (!addstrbfr ("Via: ", 5, &pbuf, &pcall->call_bufpos, 0))
+        { return 0; }
+      if (!addstrbfr (pviabuf, npos, &pbuf, &pcall->call_bufpos, 0))
+        { return 0; }
+      if (!addstrbfr (SIPEOL, 2, &pbuf, &pcall->call_bufpos, 0))
+        { return 0; }
       }
-    if (bovrflow)
-      { break; }
     }
   }
+if (!addstrbfr (0, 0, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
+
+/**********
+* extract Route headers
+**********/
+
+pcall->call_route = pbuf;
+struct hdr_field *proute;
+for (proute = pmsg->record_route; proute; proute = next_sibling_hdr (proute))
+  {
+  if (parse_rr (proute) < 0) 
+    { return 0; }
+  rr_t *prouterr;
+  for (prouterr = proute->parsed; prouterr; prouterr = prouterr->next)
+    {
+mohq_debug (pcall->pmohq, "%sRoute: %.*s", pfncname, prouterr->len, prouterr->nameaddr.name.s);//???
+    if (!addstrbfr ("Route: ", 7, &pbuf, &pcall->call_bufpos, 0))
+      { return 0; }
+    if (!addstrbfr (prouterr->nameaddr.name.s, prouterr->len,
+      &pbuf, &pcall->call_bufpos, 0))
+      { return 0; }
+    if (!addstrbfr (SIPEOL, 2, &pbuf, &pcall->call_bufpos, 0))
+      { return 0; }
+    }
+  }
+if (!addstrbfr (0, 0, &pbuf, &pcall->call_bufpos, 1))
+  { return 0; }
 
 /**********
 * update DB
@@ -548,7 +614,7 @@ pcall->call_state = CLSTA_ENTER;
 add_call_rec (ncall_idx);
 mohq_debug (pcall->pmohq, "%sAdded call (%s) to queue (%s)",
   pfncname, pcall->call_from, pcall->pmohq->mohq_name);
-return;
+return 1;
 }
 
 /**********
@@ -781,7 +847,8 @@ if (nopen < 0)
   return 0;
   }
 pcall = &pmod_data->pcall_lst [nopen];
-create_call (pmsg, pcall, nopen, mohq_idx);
+if (!create_call (pmsg, pcall, nopen, mohq_idx))
+  { return 0; }
 return pcall;
 }
 
@@ -1017,8 +1084,18 @@ if (ptm->t_get_reply_totag (pmsg, ptotag) != 1)
   delete_call (pcall);
   return;
   }
-strncpy (pcall->call_tag, ptotag->s, ptotag->len);
-pcall->call_tag [ptotag->len] = '\0';
+char *pbuf = &pcall->call_buffer [pcall->call_bufpos];
+pcall->call_tag = pbuf;
+if (!addstrbfr (ptotag->s, ptotag->len, &pbuf, &pcall->call_bufpos, 1))
+  {
+  LM_ERR ("%sInsufficient buffer space for call (%s)!",
+    pfncname, pcall->call_from);
+  if (ptm->t_reply (pmsg, 500, presp_srverr->s) < 0)
+    { LM_ERR ("%sUnable to reply to INVITE!", pfncname); }
+  end_RTP (pmsg, pcall);
+  delete_call (pcall);
+  return;
+  }
 pcall->call_cseq = 1;
 if (ptm->register_tmcb (pmsg, 0, TMCB_DESTROY | TMCB_ON_FAILURE,
   invite_cb, pcall, 0) < 0)

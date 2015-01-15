@@ -77,12 +77,15 @@ typedef struct
 
 typedef struct
   {
-  char call_id [101];
-  char call_from [URI_LEN + 1];
+  char call_buffer [1024];
+  size_t call_bufpos;
+  char *call_id;
+  char *call_from;
   char call_referto [URI_LEN + 1];
-  char call_contact [URI_LEN + 1];
-  char call_tag [101];
-  char call_via [1024];
+  char *call_contact;
+  char *call_tag;
+  char *call_via;
+  char *call_route;
   char call_addr [IP_ADDR_MAX_STR_SIZE + 4];
   int call_state;
   int call_cseq;

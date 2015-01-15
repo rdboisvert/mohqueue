@@ -53,6 +53,7 @@
 #include "../../parser/contact/parse_contact.h"
 #include "../../parser/parse_expires.h"
 #include "../../parser/parse_from.h"
+#include "../../parser/parse_rr.h"
 #include "../../parser/sdp/sdp.h"
 
 /* convenience macros */
