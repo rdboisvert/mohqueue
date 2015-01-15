@@ -120,6 +120,7 @@ char pinvitesdp [] =
 char prefermsg [] =
   {
   "%s"
+  "%s"
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
   "Referred-By: <%s>" SIPEOL
@@ -1560,6 +1561,7 @@ puri->s = pcall->call_referto;
 puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
   + strlen (pcall->call_via) // Via
+  + strlen (pcall->call_route) // Route
   + puri->len // Refer-To
   + strlen (pcall->pmohq->mohq_uri); // Referred-By
 char *pbuf = pkg_malloc (npos1);
@@ -1570,6 +1572,7 @@ if (!pbuf)
   }
 sprintf (pbuf, prefermsg,
   pcall->call_via, // Via
+  pcall->call_route, // Route
   puri->s, // Refer-To
   pcall->pmohq->mohq_uri); // Referred-By
 
