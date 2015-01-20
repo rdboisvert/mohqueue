@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2013-15 Robert Boisvert
  *
- * This file is part of the mohqueue module for sip-router, a free SIP server.
+ * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
  * The mohqueue module is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -66,9 +66,8 @@ typedef struct
 #define CLSTA_TRYING    101
 #define CLSTA_PRACKSTRT 102
 #define CLSTA_PRACKRPLY 103
-#define CLSTA_RINGING   104
-#define CLSTA_INVITED   105
-#define CLSTA_CANCEL    106
+#define CLSTA_INVITED   104
+#define CLSTA_CANCEL    105
 #define CLSTA_INQUEUE   200
 #define CLSTA_REFER     301
 #define CLSTA_RFRWAIT   302

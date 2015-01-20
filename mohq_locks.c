@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2013-15 Robert Boisvert
  *
- * This file is part of the mohqueue module for sip-router, a free SIP server.
+ * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
  * The mohqueue module is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -103,12 +103,12 @@ char *pfncname = "mohq_lock_init: ";
 plock->plock = lock_alloc ();
 if (!plock->plock)
   {
-  LM_ERR ("%sUnable to allocate lock memory!", pfncname);
+  LM_ERR ("%sUnable to allocate lock memory!\n", pfncname);
   return 0;
   }
 if (!lock_init (plock->plock))
   {
-  LM_ERR ("%sUnable to init lock!", pfncname);
+  LM_ERR ("%sUnable to init lock!\n", pfncname);
   lock_dealloc (plock->plock);
   return 0;
   }
@@ -140,7 +140,7 @@ switch (plock->lock_cnt)
     plock->lock_cnt = 0;
     break;
   case 0:
-    LM_WARN ("mohq_lock_release: Lock was not set");
+    LM_WARN ("mohq_lock_release: Lock was not set.\n");
     break;
   default:
     plock->lock_cnt--;
