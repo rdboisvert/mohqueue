@@ -167,6 +167,7 @@ int send_prov_rsp (sip_msg_t *, call_lst *);
 int send_rtp_answer (sip_msg_t *, call_lst *);
 int search_hdr_ext (struct hdr_field *, str *);
 int start_stream (sip_msg_t *, call_lst *, int);
+int stop_stream (sip_msg_t *, call_lst *, int);
 
 /**********
 * local functions
@@ -2162,6 +2163,33 @@ mohq_debug (pcall->pmohq, "%sStarting RTP link for call (%s)",
 if (fn_stream (pmsg, (char *)pmodel, (char *)-1) != 1)
   {
   LM_ERR ("%srtpproxy_stream refused for call (%s)!\n",
+    pfncname, pcall->call_from);
+  return 0;
+  }
+return 1;
+}
+
+/**********
+* Stop Streaming
+*
+* INPUT:
+*   Arg (1) = SIP message pointer
+*   Arg (2) = call pointer
+*   Arg (3) = server flag
+* OUTPUT: 0 if failed
+**********/
+
+int stop_stream (sip_msg_t *pmsg, call_lst *pcall, int bserver)
+
+{
+char *pfncname = "stop_stream: ";
+cmd_function fn_stop = bserver ? pmod_data->fn_rtp_stop_s
+  : pmod_data->fn_rtp_stop_c;
+mohq_debug (pcall->pmohq, "%sStopping RTP link for call (%s)",
+  pfncname, pcall->call_from);
+if (fn_stop (pmsg, (char *)-1, (char *)-1) != 1)
+  {
+  LM_ERR ("%srtpproxy_stop refused for call (%s)!\n",
     pfncname, pcall->call_from);
   return 0;
   }

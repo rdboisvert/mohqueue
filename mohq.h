@@ -124,6 +124,8 @@ typedef struct
   cmd_function fn_rtp_offer;
   cmd_function fn_rtp_stream_c;
   cmd_function fn_rtp_stream_s;
+  cmd_function fn_rtp_stop_c;
+  cmd_function fn_rtp_stop_s;
   } mod_data;
 
 /**********
