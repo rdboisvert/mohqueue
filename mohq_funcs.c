@@ -1199,6 +1199,9 @@ dlg_t *form_dialog (call_lst *pcall, struct to_body *pto_body)
 **********/
 
 char *pfncname = "form_dialog: ";
+str ptarget [1];
+int index;
+name_addr_t pname [1];
 struct to_body *ptob = &pto_body [0];
 struct to_body *pcontact = &pto_body [1];
 parse_to (pcall->call_from,
@@ -1211,8 +1214,33 @@ if (ptob->error != PARSE_OK)
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
-str ptarget [1];
-if (!*pcall->call_contact)
+if (*pcall->call_route)
+  {
+  /**********
+  * o find first route URI
+  * o strip off parameter
+  **********/
+
+  ptarget->s = pcall->call_route;
+  ptarget->len = strlen (pcall->call_route);
+  if (parse_nameaddr (ptarget, pname) < 0)
+    {
+    // should never happen
+    LM_ERR ("%sUnable to parse route (%s)!\n", pfncname, pcall->call_from);
+    return 0;
+    }
+  ptarget->s = pname->uri.s;
+  ptarget->len = pname->uri.len;
+  for (index = 1; index < ptarget->len; index++)
+    {
+    if (ptarget->s [index] == ';')
+      {
+      ptarget->len = index;
+      break;
+      }
+    }
+  }
+else if (!*pcall->call_contact)
   {
   ptarget->s = ptob->uri.s;
   ptarget->len = ptob->uri.len;
@@ -1436,13 +1464,13 @@ if (pstart->type != SIP_REPLY)
 * o REFER done?
 **********/
 
+int nreply = pstart->u.reply.statuscode;
 if (pmod_data->psl->freply (pmsg, 200, presp_ok) < 0)
   {
   LM_ERR ("%sUnable to create reply for call (%s)!\n",
     pfncname, pcall->call_from);
   return;
   }
-int nreply = pstart->u.reply.statuscode;
 mohq_debug (pcall->pmohq, "%sNOTIFY received reply (%d) for call (%s)",
   pfncname, nreply, pcall->call_from);
 switch (nreply / 100)
