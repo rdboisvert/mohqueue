@@ -1,6 +1,4 @@
 /*
- * $Id$
- *
  * Copyright (C) 2013-15 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
@@ -590,7 +588,7 @@ pcall->call_route = pbuf;
 struct hdr_field *proute;
 for (proute = pmsg->record_route; proute; proute = next_sibling_hdr (proute))
   {
-  if (parse_rr (proute) < 0) 
+  if (parse_rr (proute) < 0)
     { return 0; }
   rr_t *prouterr;
   for (prouterr = proute->parsed; prouterr; prouterr = prouterr->next)

@@ -1,6 +1,4 @@
 /*
- * $Id$
- *
  * Copyright (C) 2013-15 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
@@ -134,6 +132,10 @@ return 0;
 static int init_cfg (void)
 
 {
+int bfnd = 0;
+int berror = 0;
+struct stat psb [1];
+
 /**********
 * db_url, db_ctable, db_qtable exist?
 **********/
@@ -141,21 +143,18 @@ static int init_cfg (void)
 if (!db_url.s || db_url.len <= 0)
   {
   LM_ERR ("db_url parameter not set!\n");
-  return 0;
+  berror = 1;
   }
-pmod_data->pcfg->db_url = db_url;
 if (!db_ctable.s || db_ctable.len <= 0)
   {
   LM_ERR ("db_ctable parameter not set!\n");
-  return 0;
+  berror = 1;
   }
-pmod_data->pcfg->db_ctable = db_ctable;
 if (!db_qtable.s || db_qtable.len <= 0)
   {
   LM_ERR ("db_qtable parameter not set!\n");
-  return 0;
+  berror = 1;
   }
-pmod_data->pcfg->db_qtable = db_qtable;
 
 /**********
 * mohdir
@@ -166,45 +165,51 @@ pmod_data->pcfg->db_qtable = db_qtable;
 if (!*mohdir)
   {
   LM_ERR ("mohdir parameter not set!\n");
-  return 0;
+  berror = 1;
   }
-if (strlen (mohdir) > MOHDIRLEN)
+else if (strlen (mohdir) > MOHDIRLEN)
   {
   LM_ERR ("mohdir too long!\n");
-  return 0;
+  berror = 1;
   }
-pmod_data->pcfg->mohdir = mohdir;
-int bfnd = 0;
-struct stat psb [1];
-if (!lstat (mohdir, psb))
+else
   {
-  if ((psb->st_mode & S_IFMT) == S_IFDIR)
-    { bfnd = 1; }
-  }
-if (!bfnd)
-  {
-  LM_ERR ("mohdir is not a directory!\n");
-  return 0;
+  if (!lstat (mohdir, psb))
+    {
+    if ((psb->st_mode & S_IFMT) == S_IFDIR)
+      { bfnd = 1; }
+    }
+  if (!bfnd)
+    {
+    LM_ERR ("mohdir is not a directory!\n");
+    berror = 1;
+    }
   }
 
 /**********
-* max calls
-* o valid count?
+* o max calls valid?
 * o alloc memory
+* o save data
 **********/
 
 if (moh_maxcalls < 1 || moh_maxcalls > 5000)
   {
   LM_ERR ("moh_maxcalls not in range of 1-5000!\n");
-  return 0;
+  berror = 1;
   }
+if (berror)
+  { return 0; }
 pmod_data->pcall_lst =
   (call_lst *) shm_malloc (sizeof (call_lst) * moh_maxcalls);
 if (!pmod_data->pcall_lst)
   {
   LM_ERR ("Unable to allocate shared memory!\n");
-  return -1;
+  return 0;
   }
+pmod_data->pcfg->db_url = db_url;
+pmod_data->pcfg->db_ctable = db_ctable;
+pmod_data->pcfg->db_qtable = db_qtable;
+pmod_data->pcfg->mohdir = mohdir;
 memset (pmod_data->pcall_lst, 0, sizeof (call_lst) * moh_maxcalls);
 pmod_data->call_cnt = moh_maxcalls;
 return -1;
