@@ -34,7 +34,7 @@
 #define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
 #define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio MOH Queue v1.1"
+#define USRAGNT "Kamailio MOH Queue v1.2"
 
 /**********
 * local constants
@@ -93,7 +93,6 @@ char pbyemsg [] =
   "%s"
   "Max-Forwards: 70" SIPEOL
   "Contact: <%s>" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
   };
 
 str pextrahdr [1] =
@@ -103,7 +102,6 @@ str pextrahdr [1] =
   "Supported: 100rel" SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
   )
   };
 
@@ -122,10 +120,10 @@ char prefermsg [] =
   {
   "%s"
   "%s"
+  "Contact: <%s>" SIPEOL
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
   "Referred-By: <%s>" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
   };
 
 char preinvitemsg [] =
@@ -135,7 +133,6 @@ char preinvitemsg [] =
   "Contact: <%s>" SIPEOL
   ALLOWHDR SIPEOL
   "Supported: 100rel" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
   "Accept-Language: en" SIPEOL
   "Content-Type: application/sdp" SIPEOL
   };
@@ -1199,7 +1196,7 @@ dlg_t *form_dialog (call_lst *pcall, struct to_body *pto_body)
 **********/
 
 char *pfncname = "form_dialog: ";
-str ptarget [1];
+str pdsturi [1], ptarget [1];
 int index;
 name_addr_t pname [1];
 struct to_body *ptob = &pto_body [0];
@@ -1214,33 +1211,45 @@ if (ptob->error != PARSE_OK)
   }
 if (ptob->param_lst)
   { free_to_params (ptob); }
-if (*pcall->call_route)
+
+/**********
+* form dest URI from record route
+**********/
+
+if (!*pcall->call_route)
+  { pdsturi->s = 0; }
+else
   {
   /**********
   * o find first route URI
   * o strip off parameter
   **********/
 
-  ptarget->s = pcall->call_route;
-  ptarget->len = strlen (pcall->call_route);
-  if (parse_nameaddr (ptarget, pname) < 0)
+  pdsturi->s = pcall->call_route;
+  pdsturi->len = strlen (pcall->call_route);
+  if (parse_nameaddr (pdsturi, pname) < 0)
     {
     // should never happen
     LM_ERR ("%sUnable to parse route (%s)!\n", pfncname, pcall->call_from);
     return 0;
     }
-  ptarget->s = pname->uri.s;
-  ptarget->len = pname->uri.len;
-  for (index = 1; index < ptarget->len; index++)
+  pdsturi->s = pname->uri.s;
+  pdsturi->len = pname->uri.len;
+  for (index = 1; index < pdsturi->len; index++)
     {
-    if (ptarget->s [index] == ';')
+    if (pdsturi->s [index] == ';')
       {
-      ptarget->len = index;
+      pdsturi->len = index;
       break;
       }
     }
   }
-else if (!*pcall->call_contact)
+
+/**********
+* form target URI
+**********/
+
+if (!*pcall->call_contact)
   {
   ptarget->s = ptob->uri.s;
   ptarget->len = ptob->uri.len;
@@ -1287,6 +1296,11 @@ pdlg->loc_uri.s = pcall->pmohq->mohq_uri;
 pdlg->loc_uri.len = strlen (pdlg->loc_uri.s);
 pdlg->rem_uri.s = ptob->uri.s;
 pdlg->rem_uri.len = ptob->uri.len;
+if (pdsturi->s)
+  {
+  pdlg->dst_uri.s = pdsturi->s;
+  pdlg->dst_uri.len = pdsturi->len;
+  }
 return pdlg;
 }
 
@@ -1593,6 +1607,7 @@ puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
   + strlen (pcall->call_via) // Via
   + strlen (pcall->call_route) // Route
+  + strlen (pcall->pmohq->mohq_uri) // Contact
   + puri->len // Refer-To
   + strlen (pcall->pmohq->mohq_uri); // Referred-By
 char *pbuf = pkg_malloc (npos1);
@@ -1604,6 +1619,7 @@ if (!pbuf)
 sprintf (pbuf, prefermsg,
   pcall->call_via, // Via
   pcall->call_route, // Route
+  pcall->pmohq->mohq_uri, // Contact
   puri->s, // Refer-To
   pcall->pmohq->mohq_uri); // Referred-By
 
@@ -1893,7 +1909,6 @@ char *phdrtmplt =
   "Accept-Language: en" SIPEOL
   "Require: 100rel" SIPEOL
   "RSeq: %d" SIPEOL
-  "User-Agent: " USRAGNT SIPEOL
   ;
 sprintf (phdrtmp, phdrtmplt, pcall->call_cseq);
 struct lump_rpl **phdrlump = add_lump_rpl2 (pmsg, phdrtmp,
