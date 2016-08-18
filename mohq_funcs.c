@@ -1668,6 +1668,20 @@ static void refer_cb
 {
 char *pfncname = "refer_cb: ";
 call_lst *pcall = (call_lst *)*pcbp->param;
+if (pcall->state != CLSTA_REFER)
+  {
+  if (!pcall->state)
+    {
+    LM_ERR
+      ("%sREFER response ignored because call not in queue!\n", pfncname);
+    }
+  else
+    {
+    LM_ERR ("%sCall (%s) ignored because not in REFER state!\n", pfncname,
+      pcall->call_from);
+    }
+  return;
+  }
 if ((ntype == TMCB_ON_FAILURE) || (pcbp->req == FAKED_REPLY))
   {
   LM_ERR ("%sCall (%s) did not respond to REFER!\n", pfncname,
