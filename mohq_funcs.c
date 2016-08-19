@@ -1664,13 +1664,12 @@ return nret;
 
 static void refer_cb
   (struct cell *ptrans, int ntype, struct tmcb_params *pcbp)
-
 {
 char *pfncname = "refer_cb: ";
 call_lst *pcall = (call_lst *)*pcbp->param;
-if (pcall->state != CLSTA_REFER)
+if (pcall->call_state != CLSTA_REFER)
   {
-  if (!pcall->state)
+  if (!pcall->call_state)
     {
     LM_ERR
       ("%sREFER response ignored because call not in queue!\n", pfncname);
