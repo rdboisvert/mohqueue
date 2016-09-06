@@ -102,7 +102,7 @@ struct module_exports exports = {
 * local constants
 **********/
 
-str prtpstat [1] = {STR_STATIC_INIT ("RTPSTAT")};
+str prtpstat [1] = {STR_STATIC_INIT ("$rtpstat")};
 
 /**********
 * local functions
