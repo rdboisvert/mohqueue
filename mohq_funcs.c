@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-16 Robert Boisvert
+ * Copyright (C) 2013-17 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -2371,19 +2371,19 @@ return pmohfiles;
 }
 
 /**********
-* MI Debug
+* RPC Debug
 *
 * PARAMETERS:
 * queue name = queue to use
 * state = 0=off, <>0=on
 *
 * INPUT:
-*   Arg (1) = command tree pointer
+*   Arg (1) = rpc pointer
 *   Arg (2) = parms pointer
 * OUTPUT: root pointer
 **********/
 
-struct mi_root *mi_debug (struct mi_root *pcmd_tree, void *parms)
+void mohqueue_rpc_debug (rpc_t *prpc, void *parms)
 
 {
 /**********
@@ -2424,7 +2424,7 @@ return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
 }
 
 /**********
-* MI Drop Call
+* RPC Drop Call
 *
 * PARAMETERS:
 * queue name = queue to use
@@ -2436,7 +2436,7 @@ return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
 * OUTPUT: root pointer
 **********/
 
-struct mi_root *mi_drop_call (struct mi_root *pcmd_tree, void *parms)
+void mohqueue_rpc_drop_call (rpc_t *prpc, void *parms)
 
 {
 /**********

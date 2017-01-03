@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-16 Robert Boisvert
+ * Copyright (C) 2013-17 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -75,12 +75,26 @@ static param_export_t mod_parms [] = {
   { NULL, 0, NULL },
 };
 
-/* MI COMMANDS */
-static mi_export_t mi_cmds [] = {
-  { "debug", mi_debug, 0, 0, 0 },
-  { "drop_call", mi_drop_call, 0, 0, 0 },
-  { 0, 0, 0, 0, 0 }
-};
+static const char *mohqueue_rpc_debug_doc [] =
+  {
+  "Toggle mohqueue debug mode.",
+  0
+  };
+
+static const char *mohqueue_rpc_drop_call [] =
+  {
+  "Drop a mohqueue call.",
+  0
+  };
+
+/* RPC COMMANDS */
+rpc_export_t rpc_cmd [] =
+  {
+    { "mohqueue.debug", mohqueue_rpc_debug, mohqueue_rpc_debug_doc, 0 },
+    { "mohqueue.drop_call", mohqueue_rpc_drop_call,
+      mohqueue_rpc_drop_call_doc, 0 },
+    { 0, 0, 0, 0 }
+  };
 
 /* MODULE EXPORTS */
 struct module_exports exports = {
@@ -89,7 +103,7 @@ struct module_exports exports = {
   mod_cmds,         /* exported functions */
   mod_parms,        /* exported parameters */
   0,                /* statistics */
-  mi_cmds,          /* MI functions */
+  0,                /* MI functions */
   0,                /* exported pseudo-variables */
   0,                /* extra processes */
   mod_init,         /* module initialization function */
@@ -437,6 +451,16 @@ if (!pmod_data->fn_rtp_destroy)
   {
   LM_ERR ("Unable to load rtpproxy_destroy!\n");
   goto initerr;
+  }
+
+/**********
+* register RPC
+**********/
+
+if (rpc_register_array (mohqueue_rpc))
+  {
+  LM_ERR ("Unable to register RPC commands!\n");
+  return -1;
   }
 
 /**********
