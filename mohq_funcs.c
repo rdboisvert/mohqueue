@@ -32,7 +32,7 @@
 #define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
 #define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio MOH Queue v1.3"
+#define USRAGNT "Kamailio MOH Queue v1.4"
 
 /**********
 * local constants
@@ -43,8 +43,6 @@ str pallq [1] = {STR_STATIC_INIT ("*")};
 str paudio [1] = {STR_STATIC_INIT ("audio")};
 str pbye [1] = {STR_STATIC_INIT ("BYE")};
 str pinvite [1] = {STR_STATIC_INIT ("INVITE")};
-str pmi_nolock [1] = {STR_STATIC_INIT ("Unable to lock queue")};
-str pmi_noqueue [1] = {STR_STATIC_INIT ("No matching queue name found")};
 str prefer [1] = {STR_STATIC_INIT ("REFER")};
 str presp_busy [1] = {STR_STATIC_INIT ("Busy Here")};
 str presp_noaccept [1] = {STR_STATIC_INIT ("Not Acceptable Here")};
@@ -2378,12 +2376,12 @@ return pmohfiles;
 * state = 0=off, <>0=on
 *
 * INPUT:
-*   Arg (1) = rpc pointer
-*   Arg (2) = parms pointer
-* OUTPUT: root pointer
+*   Arg (1) = rpc handle
+*   Arg (2) = rpc context pointer
+* OUTPUT: none
 **********/
 
-void mohqueue_rpc_debug (rpc_t *prpc, void *parms)
+void mohqueue_rpc_debug (rpc_t *prpc, void *pctx)
 
 {
 /**********
@@ -2392,20 +2390,25 @@ void mohqueue_rpc_debug (rpc_t *prpc, void *parms)
 * o lock queue
 **********/
 
-struct mi_node *pnode = pcmd_tree->node.kids;
-if (!pnode || !pnode->next || pnode->next->next)
-  { return init_mi_tree (400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN); }
-int nq_idx = find_qname (&pnode->value);
+str pqname [1];
+int bdebug;
+if (prpc->scan (pctx, "Sd", pqname, &bdebug) != 2)
+  {
+  prpc->fault (pctx, 400, "Too few parameters!");
+  return;
+  }
+int nq_idx = find_qname (pqname);
 if (nq_idx == -1)
-  { return init_mi_tree (400, pmi_noqueue->s, pmi_noqueue->len); }
-char pint [20];
-int nsize = (pnode->next->value.len >= sizeof (pint))
-  ? sizeof (pint) - 1 : pnode->next->value.len;
-strncpy (pint, pnode->next->value.s, nsize);
-pint [nsize] = '\0';
-int bdebug = atoi (pint) ? 1 : 0;
-if (!mohq_lock_set (pmod_data->pmohq_lock, 0, 5000))
-  { return init_mi_tree (400, pmi_nolock->s, pmi_nolock->len); }
+  {
+  prpc->fault (pctx, 401, "No such queue (%.*s)!", STR_FMT (pqname));
+  return;
+  }
+if (!mohq_lock_set (pmod_data->pcall_lock, 0, 5000))
+  {
+  prpc->fault
+    (pctx, 402, "Unable to lock the queue (%.*s)!", STR_FMT (pqname));
+  return;
+  }
 
 /**********
 * o set flag
@@ -2420,7 +2423,7 @@ else
   { pqueue->mohq_flags &= ~MOHQF_DBG; }
 update_debug (pqueue, bdebug);
 mohq_lock_release (pmod_data->pmohq_lock);
-return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
+return;
 }
 
 /**********
@@ -2431,12 +2434,12 @@ return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
 * callID = *=all, otherwise callID
 *
 * INPUT:
-*   Arg (1) = command tree pointer
-*   Arg (2) = parms pointer
-* OUTPUT: root pointer
+*   Arg (1) = rpc handle
+*   Arg (2) = rpc context pointer
+* OUTPUT: none
 **********/
 
-void mohqueue_rpc_drop_call (rpc_t *prpc, void *parms)
+void mohqueue_rpc_drop_call (rpc_t *prpc, void *pctx)
 
 {
 /**********
@@ -2445,14 +2448,24 @@ void mohqueue_rpc_drop_call (rpc_t *prpc, void *parms)
 * o lock calls
 **********/
 
-struct mi_node *pnode = pcmd_tree->node.kids;
-if (!pnode || !pnode->next || pnode->next->next)
-  { return init_mi_tree (400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN); }
-int nq_idx = find_qname (&pnode->value);
+str pcallid [1], pqname [1];
+if (prpc->scan (pctx, "SS", pqname, pcallid) != 2)
+  {
+  prpc->fault (pctx, 400, "Too few parameters!");
+  return;
+  }
+int nq_idx = find_qname (pqname);
 if (nq_idx == -1)
-  { return init_mi_tree (400, pmi_noqueue->s, pmi_noqueue->len); }
+  {
+  prpc->fault (pctx, 401, "No such queue (%.*s)!", STR_FMT (pqname));
+  return;
+  }
 if (!mohq_lock_set (pmod_data->pcall_lock, 0, 5000))
-  { return init_mi_tree (400, pmi_nolock->s, pmi_nolock->len); }
+  {
+  prpc->fault
+    (pctx, 402, "Unable to lock the queue (%.*s)!", STR_FMT (pqname));
+  return;
+  }
 
 /**********
 * o find matching calls
@@ -2461,7 +2474,6 @@ if (!mohq_lock_set (pmod_data->pcall_lock, 0, 5000))
 
 mohq_lst *pqueue = &pmod_data->pmohq_lst [nq_idx];
 int nidx;
-str *pcallid = &pnode->next->value;
 for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   {
   /**********
@@ -2486,7 +2498,7 @@ for (nidx = 0; nidx < pmod_data->call_cnt; nidx++)
   close_call (FAKED_REPLY, pcall);
   }
 mohq_lock_release (pmod_data->pcall_lock);
-return init_mi_tree (200, MI_OK_S, MI_OK_LEN);
+return;
 }
 
 /**********

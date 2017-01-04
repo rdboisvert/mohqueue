@@ -3,7 +3,7 @@
 "http://www.oasis-open.org/docbook/xml/4.4/docbookx.dtd" [
 
 <!-- Include general documentation entities -->
-<!ENTITY % docentities SYSTEM "../../../docbook/entities.xml">
+<!ENTITY % docentities SYSTEM "../../../../doc/docbook/entities.xml">
 %docentities;
 
 ]>
@@ -226,7 +226,7 @@ request_route {
       <para>
 Normally calls enter the queue with an initial INVITE message that
 1) has a RURI that matches a queue URI and 2) is passed through
-<function>mohq_proc ()</function>, which is the preferred method.
+<function>mohq_process ()</function>, which is the preferred method.
       </para>
       <para>
 This function is used when you wish to send a call into a queue that
@@ -302,9 +302,8 @@ be called from any route.
   if (mohq_retrieve (MOHQNAME, CGROUP)) {
       xlog ("L_DBG", "Retrieved call from mohqueue");
       exit;
-    }
-  # queue is empty or something went wrong
   }
+  # queue is empty or something went wrong
 ...
         </programlisting>
       </example>
@@ -464,6 +463,7 @@ fails this time is not changed.
     </section>
 
   </section>
+
   <section id="audiofiles">
     <title>Audio Files</title>
       <para>
@@ -507,4 +507,48 @@ payload types.
 
   </section>
 
+  <section id="rpccmds">
+    <title>RPC Commands</title>
+
+    <section id="rpc.debug">
+      <title>
+        <function moreinfo="none">mohqueue.debug</function>
+      </title>
+      <para>
+Turns <ulink url="#mohqueues.dbase">debugging</ulink> on or off for a queue. The first paramater is the queue name and the second is a number indicating whether debugging should be turned off or on (0=off, <>0=on).
+      </para>
+      <example>
+        <title><function>rpc.debug</function> usage:</title>
+        <programlisting format="linespecific">
+...
+# enable debugging on the test queue
+rpc.debug test 1
+# disable debugging on the main queue
+rpc.debug main 0
+...
+        </programlisting>
+      </example>
+    </section>
+
+    <section id="rpc.drop_call">
+      <title>
+        <function moreinfo="none">mohqueue.drop_call</function>
+      </title>
+      <para>
+Drops a call from a queue. The first paramater is the queue name and the second is the <ulink url="#mohqcalls.dbase">call ID</ulink>. Using a call ID of "*" (asterisk) drops all calls from the queue.
+      </para>
+      <example>
+        <title><function>rpc.drop_call</function> usage:</title>
+        <programlisting format="linespecific">
+...
+# drop all calls from the test queue
+rpc.drop_call test *
+# drop a call from the main queue
+rpc.drop_call main 3807f84e-f1a860fd-db1d09d4@192.168.137.82
+...
+        </programlisting>
+      </example>
+    </section>
+
+  </section>
 </chapter>

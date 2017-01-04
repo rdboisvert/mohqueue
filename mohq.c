@@ -77,13 +77,13 @@ static param_export_t mod_parms [] = {
 
 static const char *mohqueue_rpc_debug_doc [] =
   {
-  "Toggle mohqueue debug mode.",
+  "Toggle mohqueue debug mode. Parameters: queue name, state (0=off, <>0=on)",
   0
   };
 
 static const char *mohqueue_rpc_drop_call [] =
   {
-  "Drop a mohqueue call.",
+  "Drop a mohqueue call. Parameters: queue name, callID (*=all)",
   0
   };
 

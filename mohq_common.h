@@ -27,6 +27,31 @@
 
 #include "../rr/api.h"
 
+#if VERSION < 5
+#include "../../data_lump.h"
+#include "../../data_lump_rpl.h"
+#include "../../dprint.h"
+#include "../../dset.h"
+#include "../../flags.h"
+#include "../../hashes.h"
+#include "../../locking.h"
+#include "../../lvalue.h"
+#include "../../mod_fix.h"
+#include "../../rpc.h"
+#include "../../sr_module.h"
+#include "../../str.h"
+
+#include "../../mem/mem.h"
+#include "../../mem/shm_mem.h"
+
+#include "../../parser/hf.h"
+#include "../../parser/msg_parser.h"
+#include "../../parser/contact/parse_contact.h"
+#include "../../parser/parse_expires.h"
+#include "../../parser/parse_from.h"
+#include "../../parser/parse_rr.h"
+#include "../../parser/sdp/sdp.h"
+#else
 #include "../../core/data_lump.h"
 #include "../../core/data_lump_rpl.h"
 #include "../../core/dprint.h"
@@ -48,6 +73,7 @@
 #include "../../core/rpc.h"
 #include "../../core/sr_module.h"
 #include "../../core/str.h"
+#endif
 
 #include "../../lib/kcore/cmpapi.h"
 #include "../../lib/srdb1/db.h"
