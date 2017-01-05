@@ -22,7 +22,7 @@
 #include <sys/types.h>
 #include <stdlib.h>
 
-#include "mohq.h"
+#include "mohqueue_mod.h"
 #include "mohq_db.h"
 #include "mohq_funcs.h"
 
@@ -81,14 +81,14 @@ static const char *mohqueue_rpc_debug_doc [] =
   0
   };
 
-static const char *mohqueue_rpc_drop_call [] =
+static const char *mohqueue_rpc_drop_call_doc [] =
   {
   "Drop a mohqueue call. Parameters: queue name, callID (*=all)",
   0
   };
 
 /* RPC COMMANDS */
-rpc_export_t rpc_cmd [] =
+rpc_export_t mohqueue_rpc [] =
   {
     { "mohqueue.debug", mohqueue_rpc_debug, mohqueue_rpc_debug_doc, 0 },
     { "mohqueue.drop_call", mohqueue_rpc_drop_call,

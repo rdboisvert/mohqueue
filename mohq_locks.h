@@ -22,8 +22,6 @@
 #ifndef MOHQ_LOCKS_H
 #define MOHQ_LOCKS_H
 
-#include "../../core/locking.h"
-
 /**********
 * lock record
 **********/

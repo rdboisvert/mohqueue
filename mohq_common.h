@@ -27,7 +27,7 @@
 
 #include "../rr/api.h"
 
-#if VERSION < 5
+#if SER_VER < 5000000
 #include "../../data_lump.h"
 #include "../../data_lump_rpl.h"
 #include "../../dprint.h"
@@ -38,6 +38,7 @@
 #include "../../lvalue.h"
 #include "../../mod_fix.h"
 #include "../../rpc.h"
+#include "../../rpc_lookup.h"
 #include "../../sr_module.h"
 #include "../../str.h"
 
@@ -71,6 +72,7 @@
 #include "../../core/parser/parse_rr.h"
 #include "../../core/parser/sdp/sdp.h"
 #include "../../core/rpc.h"
+#include "../../core/rpc_lookup.h"
 #include "../../core/sr_module.h"
 #include "../../core/str.h"
 #endif
