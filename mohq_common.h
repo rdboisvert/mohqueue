@@ -77,7 +77,6 @@
 #include "../../core/str.h"
 #endif
 
-#include "../../lib/kcore/cmpapi.h"
 #include "../../lib/srdb1/db.h"
 #include "../../modules/sl/sl.h"
 #include "../../modules/tm/tm_load.h"
@@ -85,7 +84,7 @@
 /* convenience macros */
 #define MOHQ_STRUCT_PTR_OFFSET( struct1, cast1, offset1 ) \
 	(cast1)(struct1) + (offset1)
-	
+
 #define MOHQ_STR_COPY( str1, str2 ) \
 	memcpy((str1)->s, (str2)->s, (str2)->len ); \
 	(str1)->len = (str2)->len;
