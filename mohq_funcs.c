@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-17 Robert Boisvert
+ * Copyright (C) 2013-19 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -32,7 +32,7 @@
 #define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
 #define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio MOH Queue v1.4"
+#define USRAGNT "Kamailio MOH Queue v1.5"
 
 /**********
 * local constants
@@ -1469,10 +1469,10 @@ if (!pbody->s)
   LM_ERR ("%sNo more memory!\n", pfncname);
   return;
   }
-strncpy (pbody->s, pfrag, pbody->len);
+memcpy (pbody->s, pfrag, pbody->len);
 if (pbody->s [pbody->len - 1] != '\n')
   {
-  strncpy (&pbody->s [pbody->len], SIPEOL, 2);
+  memcpy (&pbody->s [pbody->len], SIPEOL, 2);
   pbody->len += 2;
   }
 struct msg_start pstart [1];
@@ -1904,7 +1904,7 @@ for (npos1 = 0; npos1 < pstr->len; npos1++)
   {
   /**********
   * o find non-space
-  * o search to end, space or comma
+  * o search to end, space, semicolon or comma
   * o same size?
   * o same name?
   **********/
@@ -1913,7 +1913,8 @@ for (npos1 = 0; npos1 < pstr->len; npos1++)
     { continue; }
   for (npos2 = npos1++; npos1 < pstr->len; npos1++)
     {
-    if (pstr->s [npos1] == ' ' || pstr->s [npos1] == ',')
+    if (pstr->s [npos1] == ' ' || pstr->s [npos1] == ';'
+      || pstr->s [npos1] == ',')
       { break; }
     }
   if (npos1 - npos2 != pext->len)
@@ -2238,7 +2239,11 @@ strcpy (&pfile [npos], pcall->pmohq->mohq_mohfile);
 npos += strlen (&pfile [npos]);
 str pMOH [1] = {{pfile, npos}};
 pv_elem_t *pmodel;
-pv_parse_format (pMOH, &pmodel);
+if (pv_parse_format (pMOH, &pmodel) < 0)
+  {
+  LM_ERR("failed to parse pv format string\n");
+  return 0;
+  }
 cmd_function fn_stream = bserver ? pmod_data->fn_rtp_stream_s
   : pmod_data->fn_rtp_stream_c;
 mohq_debug (pcall->pmohq, "%sStarting RTP link for call (%s)",

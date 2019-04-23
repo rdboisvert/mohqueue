@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-17 Robert Boisvert
+ * Copyright (C) 2013-19 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -27,7 +27,7 @@
 
 #include "../rr/api.h"
 
-#if SER_VER < 5000000
+#if VERSIONVAL < 5000000
 #include "../../data_lump.h"
 #include "../../data_lump_rpl.h"
 #include "../../dprint.h"
