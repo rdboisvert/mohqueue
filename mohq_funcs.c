@@ -32,7 +32,7 @@
 #define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
 #define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio MOH Queue v1.5"
+#define USRAGNT "Kamailio MOH Queue v1.6"
 
 /**********
 * local constants
@@ -1405,9 +1405,12 @@ static void
 
 {
 call_lst *pcall = (call_lst *)*pcbp->param;
+if (pcall->call_state >= CLSTA_INQUEUE)
+  { return; }
+LM_ERR ("invite_cb: INVITE failed for call (%s), code=%x, callstate=%x!\n",
+  pcall->call_from, ntype, pcall->call_state);
 if (ntype == TMCB_DESTROY)
   { pcall->call_hash = pcall->call_label = 0; }
-LM_ERR ("invite_cb: INVITE failed for call (%s)!\n", pcall->call_from);
 delete_call (pcall);
 return;
 }
