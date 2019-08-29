@@ -32,7 +32,7 @@
 #define ALLOWHDR "Allow: INVITE, ACK, BYE, CANCEL, NOTIFY, PRACK"
 #define CLENHDR "Content-Length"
 #define SIPEOL  "\r\n"
-#define USRAGNT "Kamailio MOH Queue v1.6"
+#define USRAGNT "Kamailio MOH Queue v1.7"
 
 /**********
 * local constants
@@ -120,17 +120,6 @@ char prefermsg [] =
   "Max-Forwards: 70" SIPEOL
   "Refer-To: <%s>" SIPEOL
   "Referred-By: <%s>" SIPEOL
-  };
-
-char preinvitemsg [] =
-  {
-  "%s"
-  "Max-Forwards: 70" SIPEOL
-  "Contact: <%s>" SIPEOL
-  ALLOWHDR SIPEOL
-  "Supported: 100rel" SIPEOL
-  "Accept-Language: en" SIPEOL
-  "Content-Type: application/sdp" SIPEOL
   };
 
 char prtpsdp [] =
@@ -455,11 +444,10 @@ pdlg->state = DLG_CONFIRMED;
 **********/
 
 tm_api_t *ptm = pmod_data->ptm;
-char *pquri = pcall->pmohq->mohq_uri;
 int npos1 = sizeof (pbyemsg) // BYE template
   + strlen (pcall->call_via) // Via
   + strlen (pcall->call_route) // Route
-  + strlen (pquri); // Contact
+  + strlen (pcall->call_qcontact); // Contact
 phdr = pkg_malloc (npos1);
 if (!phdr)
   {
@@ -469,7 +457,7 @@ if (!phdr)
 sprintf (phdr, pbyemsg,
   pcall->call_via, // Via
   pcall->call_route, // Route
-  pquri); // Contact
+  pcall->call_qcontact); // Contact
 str phdrs [1];
 phdrs->s = phdr;
 phdrs->len = strlen (phdr);
@@ -522,14 +510,20 @@ int
 create_call (sip_msg_t *pmsg, call_lst *pcall, int ncall_idx, int mohq_idx)
 
 {
+char *pfncname = "create_call: ";
+char *pbuf;
+str *pstr;
+struct sip_uri puri [1];
+
 /**********
 * add values to new entry
+* o call ID
+* o from
 **********/
 
-char *pfncname = "create_call: ";
 pcall->pmohq = &pmod_data->pmohq_lst [mohq_idx];
-str *pstr = &pmsg->callid->body;
-char *pbuf = pcall->call_buffer;
+pstr = &pmsg->callid->body;
+pbuf = pcall->call_buffer;
 pcall->call_buflen = sizeof (pcall->call_buffer);
 pcall->call_id = pbuf;
 if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_buflen, 1))
@@ -538,7 +532,12 @@ pstr = &pmsg->from->body;
 pcall->call_from = pbuf;
 if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_buflen, 1))
   { return 0; }
-pcall->call_contact = pbuf;
+
+/**********
+* add caller and queue contacts
+**********/
+
+pcall->call_ccontact = pbuf;
 if (pmsg->contact)
   {
   pstr = &pmsg->contact->body;
@@ -547,6 +546,43 @@ if (pmsg->contact)
   }
 if (!addstrbfr (0, 0, &pbuf, &pcall->call_buflen, 1))
   { return 0; }
+pcall->call_qcontact = pbuf;
+pstr->s = pcall->pmohq->mohq_uri;
+pstr->len = strlen (pcall->pmohq->mohq_uri);
+if (!*pmod_data->cntcthost)
+  {
+  /**********
+  * use RURI
+  **********/
+
+  if (!addstrbfr (pstr->s, pstr->len, &pbuf, &pcall->call_buflen, 1))
+    { return 0; }
+  }
+else
+  {
+  /**********
+  * use RURI name but change to MOHQ host
+  **********/
+
+  if (parse_uri (pstr->s, pstr->len, puri))
+    {
+    LM_ERR ("%sInvalid URI (%.*s)!\n", pfncname, STR_FMT (pstr));
+    return 0;
+    }
+  if (!addstrbfr ("sip:", 4, &pbuf, &pcall->call_buflen, 0))
+    { return 0; }
+  if (puri->user.len)
+    {
+    if (!addstrbfr (puri->user.s, puri->user.len,
+      &pbuf, &pcall->call_buflen, 0))
+      { return 0; }
+    if (!addstrbfr ("@", 1, &pbuf, &pcall->call_buflen, 0))
+      { return 0; }
+    }
+  if (!addstrbfr (pmod_data->cntcthost, strlen (pmod_data->cntcthost),
+    &pbuf, &pcall->call_buflen, 1))
+    { return 0; }
+  }
 
 /**********
 * extract Via headers
@@ -1145,7 +1181,7 @@ pcall->call_state = CLSTA_TRYING;
 str pcontact [1];
 char *pcontacthdr = "Contact: <%s>" SIPEOL;
 pcontact->s
-  = pkg_malloc (strlen (pcall->pmohq->mohq_uri) + strlen (pcontacthdr));
+  = pkg_malloc (strlen (pcall->call_qcontact) + strlen (pcontacthdr));
 if (!pcontact->s)
   {
   LM_ERR ("%sNo more memory!\n", pfncname);
@@ -1153,7 +1189,7 @@ if (!pcontact->s)
   delete_call (pcall);
   return;
   }
-sprintf (pcontact->s, pcontacthdr, pcall->pmohq->mohq_uri);
+sprintf (pcontact->s, pcontacthdr, pcall->call_qcontact);
 pcontact->len = strlen (pcontact->s);
 if (!add_lump_rpl2 (pmsg, pcontact->s, pcontact->len, LUMP_RPL_HDR))
   {
@@ -1262,20 +1298,20 @@ else
 * form target URI
 **********/
 
-if (!*pcall->call_contact)
+if (!*pcall->call_ccontact)
   {
   ptarget->s = ptob->uri.s;
   ptarget->len = ptob->uri.len;
   }
 else
   {
-  parse_to (pcall->call_contact,
-    &pcall->call_contact [strlen (pcall->call_contact) + 1], pcontact);
+  parse_to (pcall->call_ccontact,
+    &pcall->call_ccontact [strlen (pcall->call_ccontact) + 1], pcontact);
   if (pcontact->error != PARSE_OK)
     {
     // should never happen
     LM_ERR ("%sInvalid contact (%s) for call (%s)!\n", pfncname,
-      pcall->call_contact, pcall->call_from);
+      pcall->call_ccontact, pcall->call_from);
     return 0;
     }
   if (pcontact->param_lst)
@@ -1623,7 +1659,7 @@ puri->len = strlen (puri->s);
 int npos1 = sizeof (prefermsg) // REFER template
   + strlen (pcall->call_via) // Via
   + strlen (pcall->call_route) // Route
-  + strlen (pcall->pmohq->mohq_uri) // Contact
+  + strlen (pcall->call_qcontact) // Contact
   + puri->len // Refer-To
   + strlen (pcall->pmohq->mohq_uri); // Referred-By
 char *pbuf = pkg_malloc (npos1);
@@ -1635,7 +1671,7 @@ if (!pbuf)
 sprintf (pbuf, prefermsg,
   pcall->call_via, // Via
   pcall->call_route, // Route
-  pcall->pmohq->mohq_uri, // Contact
+  pcall->call_qcontact, // Contact
   puri->s, // Refer-To
   pcall->pmohq->mohq_uri); // Referred-By
 
