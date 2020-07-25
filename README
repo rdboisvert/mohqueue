@@ -129,7 +129,7 @@ Chapter 1. Admin Guide
 2.2. External Libraries or Applications
 
    The rtpproxy applications supported by the rtpproxy module (e.g.
-   http://www.b2bua.org/wiki/RTPproxy).
+   https://github.com/sippy/rtpproxy ).
 
 3. Parameters
 
