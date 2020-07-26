@@ -66,8 +66,8 @@ The following modules must be loaded before this module:
       <title>External Libraries or Applications</title>
       <para>
 The rtpproxy applications supported by the rtpproxy module (e.g.
-<ulink url="http://www.b2bua.org/wiki/RTPproxy">
-http://www.b2bua.org/wiki/RTPproxy</ulink>).
+<ulink url="https://github.com/sippy/rtpproxy">
+https://github.com/sippy/rtpproxy</ulink>).
       </para>
     </section>
 
