@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-19 Robert Boisvert
+ * Copyright (C) 2013-21 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -174,6 +174,7 @@ void ack_msg (sip_msg_t *pmsg, call_lst *pcall)
 char *pfncname = "ack_msg: ";
 struct cell *ptrans;
 tm_api_t *ptm = pmod_data->ptm;
+tm_cell_t *ptcell = 0;
 if (pcall->call_state != CLSTA_INVITED)
   {
   /**********
@@ -204,7 +205,22 @@ if (ptm->t_lookup_ident (&ptrans, pcall->call_hash, pcall->call_label) < 0)
   }
 else
   {
-  if (ptm->t_release (pcall->call_pmsg) < 0)
+  ptcell = ptm->t_gett ();
+  if (ptcell == NULL || ptcell == T_UNDEFINED)
+    {
+    if (ptm->t_newtran (pmsg) < 0)
+      {
+      LM_ERR("cannot create the transaction\n");
+      return;
+      }
+    ptcell = ptm->t_gett ();
+    if (ptcell == NULL || ptcell == T_UNDEFINED)
+      {
+      LM_ERR("cannot lookup the transaction\n");
+      return;
+      }
+    }
+  if (ptm->t_release (ptcell) < 0)
     {
     LM_ERR ("%sRelease transaction failed for call (%s)!\n",
       pfncname, pcall->call_from);

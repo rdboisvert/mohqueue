@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-19 Robert Boisvert
+ * Copyright (C) 2013-21 Robert Boisvert
  *
  * This file is part of the mohqueue module for Kamailio, a free SIP server.
  *
@@ -316,11 +316,9 @@ int mod_child_init (int rank)
 
 {
 /**********
-* o seed random number generator
-* o make sure DB initialized
+* make sure DB initialized
 **********/
 
-srand (getpid () + time (0));
 if (rank == PROC_INIT || rank == PROC_TCP_MAIN || rank == PROC_MAIN)
   { return 0; }
 if (!pmod_data->pdb->init)
