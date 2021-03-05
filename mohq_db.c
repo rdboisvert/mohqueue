@@ -116,7 +116,7 @@ if (!ncnt)
 set_call_val (prvals, CALLCOL_MOHQ, CALLCOL_MOHQ, &pcall->pmohq->mohq_id);
 set_call_val (prvals, CALLCOL_CALL, CALLCOL_CALL, pcall->call_id);
 set_call_val (prvals, CALLCOL_FROM, CALLCOL_FROM, pcall->call_from);
-set_call_val (prvals, CALLCOL_CNTCT, CALLCOL_CNTCT, pcall->call_ccontact);
+set_call_val (prvals, CALLCOL_CNTCT, CALLCOL_CNTCT, pcall->call_contact);
 set_call_val (prvals, CALLCOL_TIME, CALLCOL_TIME, &pcall->call_time);
 return;
 }

@@ -79,8 +79,7 @@ typedef struct
   char *call_id;
   char *call_from;
   char call_referto [URI_LEN + 1];
-  char *call_ccontact; /* caller contact */
-  char *call_qcontact; /* queue contact */
+  char *call_contact;
   char *call_tag;
   char *call_via;
   char *call_route;
@@ -109,7 +108,6 @@ typedef struct
   mod_cfg pcfg [1];
   time_t mohq_update;
   int mohq_cnt;
-  char *cntcthost;
   mohq_lst *pmohq_lst;
   mohq_lock pmohq_lock [1];
   int call_cnt;

@@ -64,7 +64,6 @@ str db_url = str_init (DEFAULT_DB_URL);
 str db_ctable = str_init ("mohqcalls");
 str db_qtable = str_init ("mohqueues");
 char *mohdir = "";
-char *cntcthost = "";
 int moh_maxcalls = 50;
 
 static param_export_t mod_parms [] = {
@@ -72,7 +71,6 @@ static param_export_t mod_parms [] = {
   { "db_ctable", PARAM_STR, &db_ctable },
   { "db_qtable", PARAM_STR, &db_qtable },
   { "mohdir", PARAM_STRING, &mohdir },
-  { "mohq_contacthost", PARAM_STRING, &cntcthost },
   { "moh_maxcalls", INT_PARAM, &moh_maxcalls },
   { NULL, 0, NULL },
 };
@@ -231,7 +229,6 @@ pmod_data->pcfg->db_url = db_url;
 pmod_data->pcfg->db_ctable = db_ctable;
 pmod_data->pcfg->db_qtable = db_qtable;
 pmod_data->pcfg->mohdir = mohdir;
-pmod_data->cntcthost = cntcthost;
 memset (pmod_data->pcall_lst, 0, sizeof (call_lst) * moh_maxcalls);
 pmod_data->call_cnt = moh_maxcalls;
 return -1;
