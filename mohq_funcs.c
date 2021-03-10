@@ -174,7 +174,6 @@ void ack_msg (sip_msg_t *pmsg, call_lst *pcall)
 char *pfncname = "ack_msg: ";
 struct cell *ptrans;
 tm_api_t *ptm = pmod_data->ptm;
-tm_cell_t *ptcell = 0;
 if (pcall->call_state != CLSTA_INVITED)
   {
   /**********
@@ -192,9 +191,7 @@ if (pcall->call_state != CLSTA_INVITED)
   }
 
 /**********
-* o release INVITE transaction
-* o save SDP address info
-* o put in queue
+* release INVITE transaction
 **********/
 
 if (ptm->t_lookup_ident (&ptrans, pcall->call_hash, pcall->call_label) < 0)
@@ -205,18 +202,23 @@ if (ptm->t_lookup_ident (&ptrans, pcall->call_hash, pcall->call_label) < 0)
   }
 else
   {
+  /**********
+  * create new transaction if current missing
+  **********/
+
+  tm_cell_t *ptcell;
   ptcell = ptm->t_gett ();
-  if (ptcell == NULL || ptcell == T_UNDEFINED)
+  if ((ptcell == NULL) || (ptcell == T_UNDEFINED))
     {
     if (ptm->t_newtran (pmsg) < 0)
       {
-      LM_ERR("cannot create the transaction\n");
+      LM_ERR ("%sUnable to create temporary transaction!\n", pfncname);
       return;
       }
     ptcell = ptm->t_gett ();
-    if (ptcell == NULL || ptcell == T_UNDEFINED)
+  if ((ptcell == NULL) || (ptcell == T_UNDEFINED))
       {
-      LM_ERR("cannot lookup the transaction\n");
+      LM_ERR ("%sUnable to find temporary transaction!\n", pfncname);
       return;
       }
     }
@@ -227,6 +229,12 @@ else
     return;
     }
   }
+
+/**********
+* o save SDP address info
+* o put in queue
+**********/
+
 pcall->call_hash = pcall->call_label = 0;
 sprintf (pcall->call_addr, "%s %s",
   pmsg->rcv.dst_ip.af == AF_INET ? "IP4" : "IP6",
@@ -530,7 +538,6 @@ create_call (sip_msg_t *pmsg, call_lst *pcall, int ncall_idx, int mohq_idx)
 char *pfncname = "create_call: ";
 char *pbuf;
 str *pstr;
-struct sip_uri puri [1];
 
 /**********
 * add values to new entry
