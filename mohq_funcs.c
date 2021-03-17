@@ -2159,8 +2159,8 @@ memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 int nsession;
 sdp_session_cell_t *psession;
 char pflagbuf [5];
+strcpy (pflagbuf, "z20");
 fparam_t pzflag [1] = {0, FPARAM_STRING, {pflagbuf}, 0};
-pzflag->v.asciiz [0] = 0;
 for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
   {
   int nstream;
@@ -2174,7 +2174,6 @@ for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
 
     if ((pstream->ptime.len < 1) || (pstream->ptime.len > 3))
       { continue; }
-    pzflag->v.asciiz [0] = 'z';
     strncpy (&pzflag->v.asciiz [1], pstream->ptime.s, pstream->ptime.len);
     pzflag->v.asciiz [pstream->ptime.len + 1] = 0;
     mohq_debug (pcall->pmohq,
