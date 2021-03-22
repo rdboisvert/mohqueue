@@ -1038,7 +1038,6 @@ char *pfncname = "first_invite_msg: ";
 /**********
 * o SDP exists?
 * o accepts REFER?
-* o send RTP offer
 **********/
 
 if (!(pmsg->msg_flags & FL_SDP_BODY))
@@ -1071,6 +1070,11 @@ if (pmsg->allow)
     return;
     }
   }
+
+/**********
+* send RTP offer
+**********/
+
 mohq_debug (pcall->pmohq,
   "%sMaking offer for RTP link for call (%s) from queue (%s)",
   pfncname, pcall->call_from, pcall->pmohq->mohq_name);
@@ -2149,6 +2153,38 @@ build_sip_msg_from_buf (pnmsg, pbuf->s, pbuf->len, 0);
 memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 
 /**********
+* ptime set?
+**********/
+
+int nsession;
+sdp_session_cell_t *psession;
+char pflagbuf [5];
+strcpy (pflagbuf, "z20");
+fparam_t pzflag [1] = {0, FPARAM_STRING, {pflagbuf}, 0};
+for (nsession = 0; (psession = get_sdp_session (pmsg, nsession)); nsession++)
+  {
+  int nstream;
+  sdp_stream_cell_t *pstream;
+  for (nstream = 0; (pstream = get_sdp_stream (pmsg, nsession, nstream));
+    nstream++)
+    {
+    /**********
+    * ptime set?
+    **********/
+
+    if ((pstream->ptime.len < 1) || (pstream->ptime.len > 3))
+      { continue; }
+    strncpy (&pzflag->v.asciiz [1], pstream->ptime.s, pstream->ptime.len);
+    pzflag->v.asciiz [pstream->ptime.len + 1] = 0;
+    mohq_debug (pcall->pmohq,
+      "%sSet ptime (%s) for RTP link for call (%s) from queue (%s)",
+      pfncname,
+      &pzflag->v.asciiz [1], pcall->call_from, pcall->pmohq->mohq_name);
+    break;
+    }
+  }
+
+/**********
 * o send RTP answer
 * o form stream file
 * o send stream
@@ -2156,7 +2192,7 @@ memcpy (&pnmsg->rcv, &pmsg->rcv, sizeof (struct receive_info));
 
 mohq_debug (pcall->pmohq, "%sAnswering RTP link for call (%s)",
   pfncname, pcall->call_from);
-if (pmod_data->fn_rtp_answer (pnmsg, 0, 0) != 1)
+if (pmod_data->fn_rtp_answer (pnmsg, (char *) pzflag, 0) != 1)
   {
   LM_ERR ("%srtpproxy_answer refused for call (%s)!\n",
     pfncname, pcall->call_from);
